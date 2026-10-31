@@ -161,6 +161,13 @@ def attach_memory(series_id: str, ref: str, tokens, decided_by: str, date: str) 
     return f"Case {ref} was attached to confirmed series {series_id}{via}. Confirmed by {decided_by} on {date}."
 
 
+def approved_finding_memory(ref: str, title: str, difference: str, action: str, tokens, decided_by: str,
+                            date: str) -> str:
+    idents = f" Identifiers: {_ids(tokens)}." if tokens else ""
+    return (f"Approved finding on case {ref}: {title} (difference: {difference}). Next step: {action}{idents} "
+            f"Accepted by {decided_by} on {date}.")
+
+
 def exclusion_memory(token: str, reason: str, decided_by: str, date: str) -> str:
     return (f"Exclusion: identifier {token} is not a suspect identifier ({reason}). "
             f"Do not link cases on {token}. Decided by {decided_by} on {date}.")
@@ -194,7 +201,9 @@ def parse(text: str) -> Parsed:
         p.lead = m.group(1).strip()
     if m := NOTE_RE.search(text):
         p.note = m.group(1).strip()
-    if "exclusion" in low or "not a suspect" in low or "do not link" in low:
+    if "approved finding" in low:
+        p.kind = "approved"
+    elif "exclusion" in low or "not a suspect" in low or "do not link" in low:
         p.kind = "exclusion"
     elif p.series_ids:
         p.kind = "series"

@@ -290,6 +290,51 @@ async def exclude_identifier(db: AsyncSession, *, token: str, reason: str, decid
     return {"token": token, **out}
 
 
+async def save_approved_finding(db: AsyncSession, *, case_ref: str, finding: dict, tokens: list[str],
+                                decided_by: str) -> dict:
+    """An accepted investigation finding becomes approved context in this agency's memory, promoted for every agent."""
+    datapacks = await load_datapacks(db)
+    if problem := _status(datapacks):
+        return {"status": "off", "error": problem, "calls": []}
+    text = contract.approved_finding_memory(case_ref, finding["title"], finding.get("difference", ""),
+                                            finding.get("suggested_action", ""), tokens, _clean(decided_by), _today())
+    try:
+        async with open_run(datapacks, "curator") as run:
+            add = await run.memory_add("curator", "agency", text, {"kind": "approved", "case_ref": case_ref,
+                                                                   "finding": finding["fingerprint"]})
+            stored = await _record(db, add, datapack="agency", agent="curator", kind="approved", case_ref=case_ref,
+                                   submitted=text)
+            ids = [s["id"] for s in stored if s["id"]]
+            prom = await run.memory_promote("curator", "agency", ids) if ids else None
+    except MekoError as e:
+        await save_calls(db, e.run.calls if e.run else [])
+        return {"status": "error", "error": str(e), "calls": e.run.calls if e.run else []}
+    await save_calls(db, run.calls)
+    return {"status": "ok" if add.ok else "error", "error": add.error, "text": text, "ids": ids,
+            "promoted": bool(prom and prom.ok), "calls": run.calls}
+
+
+async def recall_approved(db: AsyncSession, *, case_ref: str, tokens: list[str], crime_type: str) -> dict:
+    """Before the evidence and timeline agents present a case, recall approved findings from earlier investigations."""
+    datapacks = await load_datapacks(db)
+    if problem := _status(datapacks):
+        return {"status": "off", "error": problem, "items": [], "calls": []}
+    rc = Recall()
+    try:
+        async with open_run(datapacks, "evidence") as run:
+            for token in tokens[:6]:
+                r = await run.memory_search("evidence", "agency", token, limit=5)
+                rc.add(r.hits(), "agency", "memory", "evidence", r.call_id)
+            r = await run.memory_search("timeline", "agency", f"Approved finding {crime_type.replace('_', ' ')} {case_ref}", limit=5)
+            rc.add(r.hits(), "agency", "memory", "timeline", r.call_id)
+    except MekoError as e:
+        await save_calls(db, e.run.calls if e.run else [])
+        return {"status": "error", "error": str(e), "items": [], "calls": e.run.calls if e.run else []}
+    await save_calls(db, run.calls)
+    approved = [i for i in rc.public() if i["parsed"]["kind"] == "approved"]
+    return {"status": "ok", "items": approved, "recalled": len(rc.items), "calls": run.calls}
+
+
 def _writer(datapack: str, known: MekoMemory | None) -> str:
     if known is not None:
         return known.agent

@@ -20,7 +20,7 @@ export interface MekoCall {
 }
 
 export interface MekoParsed {
-  kind: 'sighting' | 'series' | 'exclusion' | 'case' | 'other'
+  kind: 'sighting' | 'series' | 'exclusion' | 'case' | 'approved' | 'other'
   tokens: string[]
   refs: string[]
   series_ids: string[]
