@@ -13,7 +13,7 @@ from app.db.session import get_db
 from app.meko import contract
 from app.meko import service as meko
 from app.nlp import gemini
-from app.services import investigation_case
+from app.services import custody, investigation_case
 from app.services.audit_service import record_audit
 
 router = APIRouter()
@@ -36,6 +36,11 @@ class ReviewIn(BaseModel):
 @router.get("/cases/{crime_id}", summary="Documents, contradictions, timeline and approved context for one case")
 async def case_view(crime_id: uuid.UUID, user: Analyst, db: DbDep, meko_on: bool = Query(True, alias="meko")) -> dict:
     return await investigation_case.case_view(db, crime_id, with_meko=meko_on)
+
+
+@router.get("/cases/{crime_id}/approved-context", summary="Approved findings from earlier cases, recalled from Meko")
+async def approved_context(crime_id: uuid.UUID, user: Analyst, db: DbDep) -> dict:
+    return await investigation_case.approved_context(db, crime_id)
 
 
 @router.post("/cases/{crime_id}/documents", status_code=status.HTTP_201_CREATED,
@@ -80,3 +85,26 @@ async def gemini_review(crime_id: uuid.UUID, request: Request, user: Analyst, db
                        resource_id=str(crime_id), metadata={"model": review["model"], "chars_sent": review["chars_sent"],
                                                             "redactions": review["redactions"]})
     return review
+
+
+@router.get("/cases/{crime_id}/seals", summary="Chain of custody: this case's seals on Solana")
+async def list_seals(crime_id: uuid.UUID, user: Analyst, db: DbDep) -> dict:
+    return {**custody.status(), "seals": await custody.list_seals(db, crime_id)}
+
+
+@router.post("/cases/{crime_id}/seals", status_code=status.HTTP_201_CREATED,
+             summary="Seal the case file: hash every document and review, anchor the Merkle root on Solana")
+async def seal_case(crime_id: uuid.UUID, request: Request, user: Officer, db: DbDep) -> dict:
+    if not custody.status()["enabled"]:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Solana sealing is not configured on this server")
+    sealed = await custody.seal(db, crime_id, user.user_id)
+    await record_audit(db, request, user, action="investigation.case_sealed", resource_type="crime",
+                       resource_id=str(crime_id), metadata={"seal": sealed["id"], "root": sealed["merkle_root"],
+                                                            "signature": sealed["signature"], "status": sealed["status"]})
+    return sealed
+
+
+@router.get("/cases/{crime_id}/seals/{seal_id}/verify",
+            summary="Recompute the case file's hashes and check them against the seal and the chain")
+async def verify_seal(crime_id: uuid.UUID, seal_id: uuid.UUID, user: Analyst, db: DbDep) -> dict:
+    return await custody.verify(db, crime_id, seal_id)

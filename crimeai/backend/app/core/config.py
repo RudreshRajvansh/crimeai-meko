@@ -1,6 +1,7 @@
 """Typed application settings loaded from the environment."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from pydantic import BeforeValidator, Field, model_validator
@@ -140,6 +141,12 @@ class Settings(BaseSettings):
     MEKO_GRID_KEY: str = _INSECURE_DEV_SECRET
     MEKO_TIMEOUT_SECONDS: float = 90.0
 
+    # Solana chain of custody: a case file's document and review hashes are sealed on chain as one Merkle root per
+    # seal (Memo program). Devnet by default; on until the keypair file exists (scripts/solana_setup.py makes one).
+    SOLANA_RPC_URL: str = "https://api.devnet.solana.com"
+    SOLANA_CLUSTER: str = "devnet"
+    SOLANA_KEYPAIR_FILE: str = "var/solana-devnet.json"
+
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: Literal["json", "console"] = "json"
 
@@ -158,6 +165,10 @@ class Settings(BaseSettings):
     @property
     def meko_enabled(self) -> bool:
         return bool(self.MEKO_API_KEY)
+
+    @property
+    def solana_enabled(self) -> bool:
+        return Path(self.SOLANA_KEYPAIR_FILE).is_file()
 
     @model_validator(mode="after")
     def _enforce_deployed_hardening(self) -> Settings:

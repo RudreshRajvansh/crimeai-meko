@@ -19,6 +19,9 @@ pgvector==0.3.5
 # Meko shared memory over MCP (Streamable HTTP). The 1.x client fits the pydantic/starlette pins above.
 mcp==1.12.4
 
+# Solana chain of custody: builds and signs Memo transactions (JSON-RPC itself goes over httpx).
+solders==0.26.0
+
 redis[hiredis]==5.1.1
 celery[redis]==5.4.0
 slowapi==0.1.9

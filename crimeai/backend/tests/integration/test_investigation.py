@@ -2,6 +2,7 @@
 Investigation intelligence end to end on YugabyteDB: documents in, contradictions and timeline out, an officer's
 review stored, and an accepted finding written to Meko as approved context that a later case recalls.
 """
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
@@ -73,3 +74,52 @@ async def test_accepted_finding_becomes_meko_context_for_a_later_case(client, db
     assert any("DL-T-INV-2" in item["text"] for item in recalled["items"]), "the approved finding reaches the next case"
     off = (await client.get(f"/api/v1/investigation/cases/{later.id}?meko=false", headers=auth_headers_police)).json()["meko"]
     assert off["status"] == "off" and off["items"] == []
+
+
+async def test_a_sealed_case_file_shows_which_document_changed(client, db_session, auth_headers_police, auth_headers_analyst,
+                                                              tmp_path, monkeypatch):
+    import json
+
+    from solders.keypair import Keypair
+
+    from app.core.config import settings
+    from app.integrations import solana
+    from app.models.investigation import CaseDocument
+
+    key = tmp_path / "solana.json"
+    key.write_text(json.dumps(list(bytes(Keypair()))))
+    monkeypatch.setattr(settings, "SOLANA_KEYPAIR_FILE", str(key))
+    chain: dict[str, str] = {}
+
+    async def anchor(memo: str, **_):
+        chain["5sig"] = memo
+        return {"signature": "5sig", "slot": 99, "status": "anchored"}
+
+    async def memo_of(signature: str, **_):
+        return {"memo": chain.get(signature), "slot": 99, "block_time": 1793480000, "failed": False}
+
+    monkeypatch.setattr(solana, "anchor", anchor)
+    monkeypatch.setattr(solana, "memo_of", memo_of)
+
+    occurred = datetime.now(UTC) - timedelta(days=5)
+    crime = await _case(db_session, "DL-T-INV-4", occurred)
+    doc_id = await _add(client, auth_headers_police, crime.id, "seizure_memo", "Seizure memo", "Recovered motorcycle DL 5S AB 1234.",
+                        occurred + timedelta(days=1))
+    readonly = await client.post(f"/api/v1/investigation/cases/{crime.id}/seals", headers=auth_headers_analyst)
+    assert readonly.status_code == 403, "analysts verify; officers seal"
+    sealed = (await client.post(f"/api/v1/investigation/cases/{crime.id}/seals", headers=auth_headers_police)).json()
+    assert sealed["status"] == "anchored" and sealed["leaves"] == 2, "the case narrative and the memo"
+    assert f"root={sealed['merkle_root']}" in chain["5sig"] and "DL 5S" not in chain["5sig"], "only hashes go on chain"
+
+    url = f"/api/v1/investigation/cases/{crime.id}/seals/{sealed['id']}/verify"
+    intact = (await client.get(url, headers=auth_headers_analyst)).json()
+    assert intact["intact"] and intact["chain"]["matches"]
+
+    doc = await db_session.get(CaseDocument, uuid.UUID(doc_id))
+    doc.text = "Recovered motorcycle DL 5S AB 1243."
+    await db_session.commit()
+    after = (await client.get(url, headers=auth_headers_analyst)).json()
+    assert not after["intact"]
+    assert [i["state"] for i in after["items"] if i["id"] == doc_id] == ["changed"]
+    listed = (await client.get(f"/api/v1/investigation/cases/{crime.id}/seals", headers=auth_headers_analyst)).json()
+    assert listed["enabled"] and listed["seals"][0]["explorer_url"].endswith("5sig?cluster=devnet")

@@ -67,6 +67,11 @@ async def _documents(db: AsyncSession, crime: Crime) -> tuple[list[Doc], list[di
     return docs, rows, narrative
 
 
+async def document_rows(db: AsyncSession, crime: Crime) -> list[dict[str, Any]]:
+    """The case's documents as stored: the FIR (redacted) or case narrative, then every case document."""
+    return (await _documents(db, crime))[1]
+
+
 def case_ref(crime: Crime) -> str:
     return contract.case_ref(meko.AGENCY, crime.case_number or str(crime.id)[:8])
 
@@ -111,12 +116,24 @@ async def case_view(db: AsyncSession, crime_id: uuid.UUID, with_meko: bool = Tru
     ]
 
     ref = case_ref(crime)
-    recalled: dict[str, Any] = {"status": "off", "items": [], "calls": []}
-    if with_meko and settings.meko_enabled:
-        recalled = await meko.recall_approved(db, case_ref=ref, tokens=_vehicle_tokens(result["findings"], result["claims"]),
-                                              crime_type=crime.crime_type)
+    recalled = await _approved(db, crime, result) if with_meko else {"status": "off", "items": [], "calls": []}
     return {"case_ref": ref, "documents": rows, "agents": agents, **result, "meko": recalled,
             "review_statuses": list(REVIEW_STATUSES)}
+
+
+async def _approved(db: AsyncSession, crime: Crime, result: dict[str, Any]) -> dict[str, Any]:
+    if not settings.meko_enabled:
+        return {"status": "off", "items": [], "calls": []}
+    return await meko.recall_approved(db, case_ref=case_ref(crime), tokens=_vehicle_tokens(result["findings"], result["claims"]),
+                                      crime_type=crime.crime_type)
+
+
+async def approved_context(db: AsyncSession, crime_id: uuid.UUID) -> dict[str, Any]:
+    """Meko's approved findings from earlier cases that mention this case's vehicles, fetched on its own so the
+    case view does not wait on Meko."""
+    crime = await _crime(db, crime_id)
+    result, _, _ = await _analysis(db, crime)
+    return await _approved(db, crime, result)
 
 
 async def add_document(db: AsyncSession, crime_id: uuid.UUID, *, doc_type: str, title: str, text: str,

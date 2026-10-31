@@ -331,11 +331,14 @@ async def recall_approved(db: AsyncSession, *, case_ref: str, tokens: list[str],
     rc = Recall()
     try:
         async with open_run(datapacks, "evidence") as run:
-            for token in tokens[:6]:
-                r = await run.memory_search("evidence", "agency", token, limit=5)
+            await run.open_conversations([("evidence", "agency"), ("timeline", "agency")])
+            *by_token, by_case = await asyncio.gather(
+                *(run.memory_search("evidence", "agency", token, limit=5) for token in tokens[:6]),
+                run.memory_search("timeline", "agency", f"Approved finding {crime_type.replace('_', ' ')} {case_ref}", limit=5),
+            )
+            for r in by_token:
                 rc.add(r.hits(), "agency", "memory", "evidence", r.call_id)
-            r = await run.memory_search("timeline", "agency", f"Approved finding {crime_type.replace('_', ' ')} {case_ref}", limit=5)
-            rc.add(r.hits(), "agency", "memory", "timeline", r.call_id)
+            rc.add(by_case.hits(), "agency", "memory", "timeline", by_case.call_id)
     except MekoError as e:
         await save_calls(db, e.run.calls if e.run else [])
         return {"status": "error", "error": str(e), "items": [], "calls": e.run.calls if e.run else []}

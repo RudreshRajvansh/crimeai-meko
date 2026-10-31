@@ -88,3 +88,32 @@ export interface GeminiReview {
   plan: string[]
   missing_documents: string[]
 }
+
+export interface Seal {
+  id: string
+  created_at: string | null
+  merkle_root: string
+  leaves: number
+  memo: string
+  cluster: string
+  signature: string | null
+  slot: number | null
+  status: 'anchored' | 'submitted' | 'failed'
+  error: string | null
+  explorer_url: string | null
+}
+
+export interface SealList {
+  enabled: boolean
+  cluster: string
+  address: string | null
+  seals: Seal[]
+}
+
+export interface SealVerification {
+  seal: Seal
+  items: { kind: 'document' | 'review'; id: string; label: string; state: 'unchanged' | 'changed' | 'added' | 'removed' }[]
+  record_ok: boolean
+  chain: { checked: boolean; found?: boolean; matches?: boolean; memo?: string | null; slot?: number | null; block_time?: number | null; error?: string }
+  intact: boolean
+}

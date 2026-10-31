@@ -10,6 +10,7 @@ import { DOCUMENT_TYPES, investigationApi } from '@/services/investigation'
 import { useAuthStore } from '@/store/auth'
 import { cn, formatDate } from '@/utils'
 import { Tokens } from '@/components/fir/MekoPanel'
+import CustodyPanel from './CustodyPanel'
 import type { CaseDocument, Finding, GeminiNote, GeminiReview, ReviewStatus, TimelineEvent } from '@/types/investigation'
 
 const STATUS: Record<ReviewStatus, { label: string; className: string }> = {
@@ -35,7 +36,10 @@ const EVENT_DOT: Record<TimelineEvent['kind'], string> = {
 export default function InvestigationPanel({ crimeId }: { crimeId: string }) {
   const [mekoOn, setMekoOn] = useState(true)
   const canAct = useAuthStore((s) => s.hasRole('police'))
-  const view = useQuery({ queryKey: ['investigation', crimeId, mekoOn], queryFn: () => investigationApi.view(crimeId, mekoOn) })
+  // The agents' analysis comes straight from YugabyteDB; Meko's approved context loads beside it, so the case
+  // never waits on Meko.
+  const view = useQuery({ queryKey: ['investigation', crimeId], queryFn: () => investigationApi.view(crimeId, false) })
+  const approved = useQuery({ queryKey: ['investigation', crimeId, 'meko'], queryFn: () => investigationApi.approved(crimeId), enabled: mekoOn })
   const gemini = useMutation({ mutationFn: () => investigationApi.gemini(crimeId), onError: (err) => toast.error(getErrorMessage(err)) })
 
   if (view.isLoading) {
@@ -100,9 +104,11 @@ export default function InvestigationPanel({ crimeId }: { crimeId: string }) {
 
       <Timeline events={data.timeline} gaps={gaps} crimeId={crimeId} canAct={canAct} gapDays={data.gap_days} notes={notes} />
 
-      {mekoOn && <ApprovedContext data={data.meko} />}
+      {mekoOn && <ApprovedContext data={approved.data} />}
 
       <Documents crimeId={crimeId} documents={data.documents} canAct={canAct} />
+
+      <CustodyPanel crimeId={crimeId} canAct={canAct} />
     </section>
   )
 }
@@ -232,18 +238,19 @@ function GeminiPlan({ review }: { review: GeminiReview }) {
   )
 }
 
-function ApprovedContext({ data }: { data: { status: string; error?: string; items: { ref: string; id: string | null; text: string }[] } }) {
+function ApprovedContext({ data }: { data?: { status: string; error?: string; items: { ref: string; id: string | null; text: string }[] } }) {
   return (
     <div className="rounded border border-accent-purple/40 bg-accent-purple/[0.04] p-3">
       <h3 className="flex items-center gap-2 text-xs font-semibold text-text-primary">
         <BrainCircuit size={13} className="text-accent-purple" /> Approved context from earlier investigations (Meko)
       </h3>
-      {data.status !== 'ok' && <p className="mt-1 text-2xs text-text-muted">{data.error ?? 'Meko is off.'}</p>}
-      {data.status === 'ok' && data.items.length === 0 && (
+      {!data && <p className="mt-1 text-2xs text-text-muted"><Loader2 size={11} className="mr-1 inline animate-spin" />Agents are recalling approved findings from Meko…</p>}
+      {data && data.status !== 'ok' && <p className="mt-1 text-2xs text-text-muted">{data.error ?? 'Meko is off.'}</p>}
+      {data?.status === 'ok' && data.items.length === 0 && (
         <p className="mt-1 text-2xs text-text-muted">No officer-approved finding from another case mentions this case's vehicles.</p>
       )}
       <ul className="mt-1 space-y-1">
-        {data.items.map((m) => (
+        {data?.items.map((m) => (
           <li key={m.ref} className="rounded bg-bg-tertiary px-2 py-1 text-2xs text-text-primary">
             <span className="mr-1 font-mono text-accent-cyan">{m.ref}</span><Tokens text={m.text} />
           </li>
