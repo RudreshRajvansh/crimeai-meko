@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +12,7 @@ from app.api.v1.dependencies.auth import Analyst, Officer
 from app.db.session import get_db
 from app.meko import contract
 from app.meko import service as meko
+from app.nlp import gemini
 from app.services import investigation_case
 from app.services.audit_service import record_audit
 
@@ -67,3 +68,15 @@ async def review(crime_id: uuid.UUID, fingerprint: str, body: ReviewIn, request:
                        resource_id=str(crime_id), metadata={"finding": fingerprint[:64], "decision": body.decision,
                                                             "meko": result["meko"].get("status")})
     return result
+
+
+@router.post("/cases/{crime_id}/gemini",
+             summary="Gemini explains each finding and drafts next steps (identifiers redacted before sending, audited)")
+async def gemini_review(crime_id: uuid.UUID, request: Request, user: Analyst, db: DbDep) -> dict:
+    if not gemini.enabled():
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Gemini is not configured on this server")
+    review = await investigation_case.gemini_review(db, crime_id)
+    await record_audit(db, request, user, action="investigation.gemini_review", resource_type="crime",
+                       resource_id=str(crime_id), metadata={"model": review["model"], "chars_sent": review["chars_sent"],
+                                                            "redactions": review["redactions"]})
+    return review

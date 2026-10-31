@@ -236,25 +236,8 @@ def _parse(raw: str) -> dict[str, Any]:
     return data
 
 
-async def case_brief(
-    text: str, incident_date: date | datetime | None = None, *, client: httpx.AsyncClient | None = None,
-) -> dict[str, Any]:
-    """Redact, ask Gemini for a structured English brief, and check its section suggestions."""
-    if not enabled():
-        raise ExternalServiceError("Gemini is not configured: set GEMINI_API_KEY")
-    redaction = redact(normalise_digits(text or ""))
-    sent = redaction.text[:_MAX_CHARS]
-    code = governing_code(incident_date)
-    payload = {
-        "systemInstruction": {"parts": [{"text": _instruction(code)}]},
-        "contents": [{"role": "user", "parts": [{"text": f"FIR text:\n{sent}"}]}],
-        "generationConfig": {
-            "temperature": 0.2,
-            "maxOutputTokens": 4096,
-            "responseMimeType": "application/json",
-            "responseSchema": _SCHEMA,
-        },
-    }
+async def _ask(payload: dict[str, Any], client: httpx.AsyncClient | None = None) -> dict[str, Any]:
+    """Send a structured-output request and return the parsed JSON answer."""
     owned = client is None
     client = client or httpx.AsyncClient(timeout=settings.GEMINI_TIMEOUT_SECONDS)
     try:
@@ -277,8 +260,29 @@ async def case_brief(
         blocked = (body.get("promptFeedback") or {}).get("blockReason")
         raise ExternalServiceError("Gemini returned no answer", detail=blocked)
     parts = (candidates[0].get("content") or {}).get("parts") or []
-    data = _parse("".join(p.get("text", "") for p in parts if not p.get("thought")))
+    return _parse("".join(p.get("text", "") for p in parts if not p.get("thought")))
 
+
+async def case_brief(
+    text: str, incident_date: date | datetime | None = None, *, client: httpx.AsyncClient | None = None,
+) -> dict[str, Any]:
+    """Redact, ask Gemini for a structured English brief, and check its section suggestions."""
+    if not enabled():
+        raise ExternalServiceError("Gemini is not configured: set GEMINI_API_KEY")
+    redaction = redact(normalise_digits(text or ""))
+    sent = redaction.text[:_MAX_CHARS]
+    code = governing_code(incident_date)
+    payload = {
+        "systemInstruction": {"parts": [{"text": _instruction(code)}]},
+        "contents": [{"role": "user", "parts": [{"text": f"FIR text:\n{sent}"}]}],
+        "generationConfig": {
+            "temperature": 0.2,
+            "maxOutputTokens": 4096,
+            "responseMimeType": "application/json",
+            "responseSchema": _SCHEMA,
+        },
+    }
+    data = await _ask(payload, client)
     facts = data.get("facts") if isinstance(data.get("facts"), dict) else {}
     return {
         "model": settings.GEMINI_MODEL,
@@ -296,7 +300,84 @@ async def case_brief(
     }
 
 
-_OCR_TYPES = {"image/png", "image/jpeg", "image/webp", "image/heic", "image/heif", "application/pdf"}
+_REVIEW_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "findings": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {"fingerprint": _STR, "explanation": _STR, "likely_cause": _STR, "verify_with": _STR,
+                               "next_step": _STR},
+                "required": ["fingerprint", "explanation", "likely_cause", "verify_with", "next_step"],
+            },
+        },
+        "plan": {"type": "ARRAY", "items": _STR},
+        "missing_documents": {"type": "ARRAY", "items": _STR},
+    },
+    "required": ["findings", "plan", "missing_documents"],
+}
+_REVIEW_INSTRUCTION = (
+    "You assist Indian police investigating officers. You get one case: its documents (FIR, witness statements, "
+    "CCTV notes, seizure memos, forensic reports) and the findings that rule-based agents raised, each quoting the "
+    "documents. For every finding, keep its fingerprint and write: explanation (what disagrees and why it matters "
+    "for the case), likely_cause (an honest, innocent or not, reason such records diverge, e.g. a witness estimating "
+    "time, a clerical slip), verify_with (the record that would settle it: CCTV export, call detail records, RTO "
+    "register, bank statement) and next_step (one concrete action). Never decide that a person is lying or guilty, "
+    "and add no facts that the documents do not contain. Personal identifiers are masked as [PHONE], [UPI] and "
+    "similar: keep the masks. Then give a plan of three to five next steps in order, and up to four documents an "
+    "investigator would expect in this file that are missing. Answer in English; every string under 40 words."
+)
+
+
+async def investigation_review(
+    case: dict[str, Any], findings: list[dict[str, Any]], documents: list[dict[str, Any]], *,
+    client: httpx.AsyncClient | None = None,
+) -> dict[str, Any]:
+    """Explain a case's contradictions and gaps and draft the next steps; the officer decides."""
+    if not enabled():
+        raise ExternalServiceError("Gemini is not configured: set GEMINI_API_KEY")
+    counts: dict[str, int] = {}
+    docs = []
+    for d in documents:
+        redaction = redact(normalise_digits(d.get("text") or ""))
+        for k, v in redaction.counts.items():
+            counts[k] = counts.get(k, 0) + v
+        docs.append(f"### {d.get('type_label') or d.get('doc_type')}: {d.get('title')} "
+                    f"(recorded {d.get('recorded_at') or 'date not given'})\n{redaction.text[:2500]}")
+    raised = [{
+        "fingerprint": f["fingerprint"], "title": f["title"], "difference": f.get("difference"),
+        "quotes": [f"{c['doc_title']}: \"{redact(c['quote']).text}\"" for c in f.get("claims", [])],
+        "agent_suggestion": f.get("suggested_action"),
+    } for f in findings]
+    prompt = (f"Case: {case.get('crime_type')} in {case.get('district')}, registered {case.get('occurred_at')}.\n\n"
+              f"Findings:\n{json.dumps(raised, ensure_ascii=False, indent=1)}\n\nDocuments:\n" + "\n\n".join(docs))
+    sent = prompt[:_MAX_CHARS * 2]
+    data = await _ask({
+        "systemInstruction": {"parts": [{"text": _REVIEW_INSTRUCTION}]},
+        "contents": [{"role": "user", "parts": [{"text": sent}]}],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 4096, "responseMimeType": "application/json",
+                             "responseSchema": _REVIEW_SCHEMA},
+    }, client)
+
+    known = {f["fingerprint"] for f in findings}
+    explained = {}
+    for item in data.get("findings") or []:
+        if isinstance(item, dict) and item.get("fingerprint") in known:
+            explained[item["fingerprint"]] = {k: str(item.get(k, "") or "").strip()
+                                              for k in ("explanation", "likely_cause", "verify_with", "next_step")}
+    return {
+        "model": settings.GEMINI_MODEL,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "chars_sent": len(sent),
+        "redactions": counts,
+        "findings": explained,
+        "plan": _strings(data.get("plan"), 5),
+        "missing_documents": _strings(data.get("missing_documents"), 4),
+    }
+
+
+_OCR_TYPES ={"image/png", "image/jpeg", "image/webp", "image/heic", "image/heif", "application/pdf"}
 _OCR_INSTRUCTION = (
     "You are an OCR engine for Indian police First Information Report (FIR) forms. Transcribe ALL text in the "
     "image exactly as written, printed and handwritten. A single FIR often mixes scripts and languages, for "

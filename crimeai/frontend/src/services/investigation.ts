@@ -1,5 +1,5 @@
 import { api } from './api'
-import type { InvestigationView, ReviewResult, ReviewStatus } from '@/types/investigation'
+import type { GeminiReview, InvestigationView, ReviewResult, ReviewStatus } from '@/types/investigation'
 
 export const DOCUMENT_TYPES: Record<string, string> = {
   witness_statement: 'Witness statement',
@@ -26,4 +26,7 @@ export const investigationApi = {
 
   review: (crimeId: string, fingerprint: string, decision: ReviewStatus, note: string) =>
     api.post<ReviewResult>(`/investigation/cases/${crimeId}/findings/${fingerprint}/review`, { decision, note }, SLOW).then((r) => r.data),
+
+  gemini: (crimeId: string) =>
+    api.post<GeminiReview>(`/investigation/cases/${crimeId}/gemini`, {}, SLOW).then((r) => r.data),
 }

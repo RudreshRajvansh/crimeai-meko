@@ -183,3 +183,48 @@ async def test_vertex_ai_answers_when_every_api_key_is_out_of_credit(monkeypatch
         brief = await gemini.case_brief(FIR, AFTER_BNS, client=client)
 
     assert hosts == ["generativelanguage.googleapis.com", "aiplatform.googleapis.com"] and brief["summary"]
+
+
+FINDING = {
+    "fingerprint": "f1", "title": "Incident time differs between documents: 8:00 PM vs 9:04 PM", "difference": "1 h 4 min",
+    "claims": [{"doc_title": "FIR DL-1", "quote": "at about 8 PM; caller 9876543210 rang him"},
+               {"doc_title": "CCTV note", "quote": "the motorcycle leaves at 21:04"}],
+    "suggested_action": "Ask the witness again; check the CCTV clock.",
+}
+DOCS = [{"type_label": "FIR", "title": "FIR DL-1", "recorded_at": None,
+         "text": "Motorcycle stolen at about 8 PM. Complainant phone 9876543210."},
+        {"type_label": "CCTV note", "title": "CCTV note", "recorded_at": "2026-10-08", "text": "Leaves at 21:04."}]
+
+
+async def test_investigation_review_sends_redacted_documents_and_keeps_only_known_findings(key):
+    sent = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent["body"] = request.content.decode()
+        return httpx.Response(200, json=_reply({
+            "findings": [
+                {"fingerprint": "f1", "explanation": "Witness time and CCTV time disagree by an hour.",
+                 "likely_cause": "The witness estimated the time.", "verify_with": "CCTV export with clock check",
+                 "next_step": "Record PW-1 again with the CCTV still."},
+                {"fingerprint": "invented", "explanation": "x", "likely_cause": "x", "verify_with": "x", "next_step": "x"},
+            ],
+            "plan": ["Export CCTV", "Check RTO register", "", "Re-examine PW-1"],
+            "missing_documents": ["RTO ownership record"],
+        }))
+
+    async with _client(handler) as client:
+        review = await gemini.investigation_review({"crime_type": "vehicle_theft", "district": "Saket"},
+                                                   [FINDING], DOCS, client=client)
+    assert "9876543210" not in sent["body"], "phone numbers are masked before anything leaves"
+    assert "[PHONE]" in sent["body"]
+    assert set(review["findings"]) == {"f1"}, "Gemini cannot add findings of its own"
+    assert review["findings"]["f1"]["verify_with"] == "CCTV export with clock check"
+    assert review["plan"] == ["Export CCTV", "Check RTO register", "Re-examine PW-1"]
+    assert review["redactions"]
+
+
+async def test_investigation_review_is_off_without_a_key(monkeypatch):
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "")
+    monkeypatch.setattr(settings, "VERTEX_PROJECT", "")
+    with pytest.raises(ExternalServiceError):
+        await gemini.investigation_review({}, [FINDING], DOCS)

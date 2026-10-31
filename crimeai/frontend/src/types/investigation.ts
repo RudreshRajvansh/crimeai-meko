@@ -71,3 +71,20 @@ export interface ReviewResult {
   review_note: string | null
   meko: { status: string; promoted?: boolean; error?: string | null }
 }
+
+export interface GeminiNote {
+  explanation: string
+  likely_cause: string
+  verify_with: string
+  next_step: string
+}
+
+export interface GeminiReview {
+  model: string
+  generated_at: string
+  chars_sent: number
+  redactions: Record<string, number>
+  findings: Record<string, GeminiNote>
+  plan: string[]
+  missing_documents: string[]
+}

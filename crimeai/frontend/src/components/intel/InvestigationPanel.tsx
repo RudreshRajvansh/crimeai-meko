@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle, BrainCircuit, CalendarClock, CheckCircle2, CircleDashed, FilePlus2, FileText, HelpCircle, Loader2,
-  SearchCheck, Trash2, XCircle,
+  SearchCheck, Sparkles, Trash2, XCircle,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { getErrorMessage } from '@/services'
@@ -10,7 +10,7 @@ import { DOCUMENT_TYPES, investigationApi } from '@/services/investigation'
 import { useAuthStore } from '@/store/auth'
 import { cn, formatDate } from '@/utils'
 import { Tokens } from '@/components/fir/MekoPanel'
-import type { CaseDocument, Finding, ReviewStatus, TimelineEvent } from '@/types/investigation'
+import type { CaseDocument, Finding, GeminiNote, GeminiReview, ReviewStatus, TimelineEvent } from '@/types/investigation'
 
 const STATUS: Record<ReviewStatus, { label: string; className: string }> = {
   open: { label: 'Open', className: 'bg-bg-tertiary text-text-secondary' },
@@ -36,6 +36,7 @@ export default function InvestigationPanel({ crimeId }: { crimeId: string }) {
   const [mekoOn, setMekoOn] = useState(true)
   const canAct = useAuthStore((s) => s.hasRole('police'))
   const view = useQuery({ queryKey: ['investigation', crimeId, mekoOn], queryFn: () => investigationApi.view(crimeId, mekoOn) })
+  const gemini = useMutation({ mutationFn: () => investigationApi.gemini(crimeId), onError: (err) => toast.error(getErrorMessage(err)) })
 
   if (view.isLoading) {
     return <section className="card p-5 text-xs text-text-muted"><Loader2 size={13} className="mr-1 inline animate-spin" />Agents are reading the case documents…</section>
@@ -46,6 +47,7 @@ export default function InvestigationPanel({ crimeId }: { crimeId: string }) {
   const data = view.data
   const contradictions = data.findings.filter((f) => f.kind === 'contradiction')
   const gaps = data.findings.filter((f) => f.kind === 'gap')
+  const notes = gemini.data?.findings ?? {}
 
   return (
     <section className="card space-y-4 p-5">
@@ -58,11 +60,18 @@ export default function InvestigationPanel({ crimeId }: { crimeId: string }) {
             {data.documents.length} documents read together. Every lead cites its source; officers decide.
           </p>
         </div>
-        <button type="button" role="switch" aria-checked={mekoOn} onClick={() => setMekoOn((v) => !v)}
-          className={cn('inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-2xs font-semibold',
-            mekoOn ? 'border-accent-purple/50 bg-accent-purple/15 text-accent-purple' : 'border-border-default text-text-muted')}>
-          <span className={cn('h-2 w-2 rounded-full', mekoOn ? 'bg-accent-purple' : 'bg-text-muted')} /> Meko {mekoOn ? 'ON' : 'OFF'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button type="button" className="btn-secondary py-1 text-2xs" disabled={gemini.isPending || data.findings.length === 0}
+            onClick={() => gemini.mutate()} title="Identifiers are masked before anything is sent">
+            {gemini.isPending ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} className="text-accent-blue" />}
+            {gemini.data ? 'Ask Gemini again' : 'Explain with Gemini'}
+          </button>
+          <button type="button" role="switch" aria-checked={mekoOn} onClick={() => setMekoOn((v) => !v)}
+            className={cn('inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-2xs font-semibold',
+              mekoOn ? 'border-accent-purple/50 bg-accent-purple/15 text-accent-purple' : 'border-border-default text-text-muted')}>
+            <span className={cn('h-2 w-2 rounded-full', mekoOn ? 'bg-accent-purple' : 'bg-text-muted')} /> Meko {mekoOn ? 'ON' : 'OFF'}
+          </button>
+        </div>
       </header>
 
       <ol className="grid gap-2 sm:grid-cols-3">
@@ -83,11 +92,13 @@ export default function InvestigationPanel({ crimeId }: { crimeId: string }) {
             (times within {data.time_tolerance_min} minutes count as the same).</p>
         )}
         <div className="space-y-2">
-          {contradictions.map((f) => <FindingCard key={f.fingerprint} crimeId={crimeId} finding={f} canAct={canAct} />)}
+          {contradictions.map((f) => <FindingCard key={f.fingerprint} crimeId={crimeId} finding={f} canAct={canAct} note={notes[f.fingerprint]} />)}
         </div>
       </div>
 
-      <Timeline events={data.timeline} gaps={gaps} crimeId={crimeId} canAct={canAct} gapDays={data.gap_days} />
+      {gemini.data && <GeminiPlan review={gemini.data} />}
+
+      <Timeline events={data.timeline} gaps={gaps} crimeId={crimeId} canAct={canAct} gapDays={data.gap_days} notes={notes} />
 
       {mekoOn && <ApprovedContext data={data.meko} />}
 
@@ -96,7 +107,9 @@ export default function InvestigationPanel({ crimeId }: { crimeId: string }) {
   )
 }
 
-function FindingCard({ crimeId, finding, canAct }: { crimeId: string; finding: Finding; canAct: boolean }) {
+function FindingCard({ crimeId, finding, canAct, note: gemini }: {
+  crimeId: string; finding: Finding; canAct: boolean; note?: GeminiNote
+}) {
   const qc = useQueryClient()
   const [note, setNote] = useState('')
   const review = useMutation({
@@ -132,6 +145,15 @@ function FindingCard({ crimeId, finding, canAct }: { crimeId: string; finding: F
         </table>
       )}
       <p className="mt-2 text-2xs text-text-secondary"><span className="font-semibold text-text-primary">Suggested action:</span> {finding.suggested_action}</p>
+      {gemini && (
+        <div className="mt-2 rounded border border-accent-blue/30 bg-accent-blue/[0.05] p-2 text-2xs text-text-secondary">
+          <p className="mb-0.5 flex items-center gap-1 font-semibold text-accent-blue"><Sparkles size={10} /> Gemini (a draft, not a finding)</p>
+          <p className="text-text-primary">{gemini.explanation}</p>
+          {gemini.likely_cause && <p><span className="font-semibold">Likely cause:</span> {gemini.likely_cause}</p>}
+          {gemini.verify_with && <p><span className="font-semibold">Verify with:</span> {gemini.verify_with}</p>}
+          {gemini.next_step && <p><span className="font-semibold">Next step:</span> {gemini.next_step}</p>}
+        </div>
+      )}
       {finding.review_note && <p className="mt-1 text-2xs text-text-muted">Officer's note: {finding.review_note}</p>}
       {canAct && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -154,8 +176,8 @@ function FindingCard({ crimeId, finding, canAct }: { crimeId: string; finding: F
   )
 }
 
-function Timeline({ events, gaps, crimeId, canAct, gapDays }: {
-  events: TimelineEvent[]; gaps: Finding[]; crimeId: string; canAct: boolean; gapDays: number
+function Timeline({ events, gaps, crimeId, canAct, gapDays, notes }: {
+  events: TimelineEvent[]; gaps: Finding[]; crimeId: string; canAct: boolean; gapDays: number; notes: Record<string, GeminiNote>
 }) {
   const gapAfter = new Map(gaps.map((g) => [g.from, g]))
   const shownGaps = new Set<string>()
@@ -176,11 +198,36 @@ function Timeline({ events, gaps, crimeId, canAct, gapDays }: {
               <p className="text-2xs text-text-muted">{formatDate(e.at, e.date_only ? 'dd MMM yyyy' : 'dd MMM yyyy, HH:mm')}</p>
               <p className="text-xs text-text-primary">{e.label} <span className="text-2xs text-text-muted">· {e.source}</span></p>
               {e.quote && <p className="text-2xs italic text-text-secondary">“{e.quote}”</p>}
-              {gap && <div className="my-2"><FindingCard crimeId={crimeId} finding={gap} canAct={canAct} /></div>}
+              {gap && <div className="my-2"><FindingCard crimeId={crimeId} finding={gap} canAct={canAct} note={notes[gap.fingerprint]} /></div>}
             </li>
           )
         })}
       </ol>
+    </div>
+  )
+}
+
+function GeminiPlan({ review }: { review: GeminiReview }) {
+  const masked = Object.values(review.redactions).reduce((a, b) => a + b, 0)
+  return (
+    <div className="rounded border border-accent-blue/40 bg-accent-blue/[0.04] p-3">
+      <h3 className="flex items-center gap-2 text-xs font-semibold text-text-primary">
+        <Sparkles size={13} className="text-accent-blue" /> Draft investigation plan · Gemini
+      </h3>
+      <p className="mt-0.5 text-2xs text-text-muted">
+        {review.model} · {review.chars_sent.toLocaleString()} characters sent, {masked} identifier{masked === 1 ? '' : 's'} masked
+        first. A draft for the investigating officer.
+      </p>
+      {review.plan.length > 0 && (
+        <ol className="mt-2 list-decimal space-y-0.5 pl-4 text-xs text-text-primary">
+          {review.plan.map((step) => <li key={step}>{step}</li>)}
+        </ol>
+      )}
+      {review.missing_documents.length > 0 && (
+        <p className="mt-2 text-2xs text-text-secondary">
+          <span className="font-semibold text-text-primary">Missing from the file:</span> {review.missing_documents.join('; ')}
+        </p>
+      )}
     </div>
   )
 }

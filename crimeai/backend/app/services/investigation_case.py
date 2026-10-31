@@ -24,6 +24,7 @@ from app.models.audit_log import AuditLog
 from app.models.crime import Crime
 from app.models.fir import FIRReport
 from app.models.investigation import DOCUMENT_TYPES, REVIEW_STATUSES, CaseDocument, InvestigationFinding
+from app.nlp import gemini
 from app.nlp.legal.bns_crosswalk import analyse_sections
 from app.nlp.multilingual import analyse, normalise_for_legal
 from app.nlp.privacy.redaction import redact
@@ -168,3 +169,12 @@ async def review_finding(db: AsyncSession, crime_id: uuid.UUID, fingerprint: str
             db, case_ref=case_ref(crime), finding=finding, tokens=_vehicle_tokens([finding], []), decided_by=decided_by)
     return {"fingerprint": fingerprint, "status": decision, "review_note": clean_note, "reviewed_at": now.isoformat(),
             "meko": shared}
+
+
+async def gemini_review(db: AsyncSession, crime_id: uuid.UUID) -> dict[str, Any]:
+    """Gemini's explanation of each finding and a draft plan, over the same documents the agents read."""
+    crime = await _crime(db, crime_id)
+    result, rows, _ = await _analysis(db, crime)
+    case = {"crime_type": crime.crime_type, "district": crime.district,
+            "occurred_at": crime.occurred_at.isoformat() if crime.occurred_at else None}
+    return await gemini.investigation_review(case, result["findings"], rows)
