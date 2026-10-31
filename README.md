@@ -9,8 +9,9 @@ CrimeAI is an intelligence layer for Indian police stations. It reads FIRs in In
 ## hackCBS 9.0: shared memory between agencies, on Meko and YugabyteDB
 
 > CrimeAI was first built at InnoHacks 4.0. **What was built at hackCBS 9.0** is everything in this section: the
-> move from PostgreSQL to YugabyteDB, and Meko shared memory between police agencies (`crimeai/backend/app/meko`,
-> the Meko panel on the FIR page, the Shared Memory page, migrations 0010 and 0011).
+> move from PostgreSQL to YugabyteDB, Meko shared memory between police agencies (`crimeai/backend/app/meko`, the
+> Meko panel on the FIR page, the Shared Memory page), and investigation intelligence on the case dossier
+> (contradictions, timeline, officer review), migrations 0010 to 0012. The git history shows the starting point.
 
 CrimeAI links FIRs inside one agency's records. A courier-fraud ring in the NCR works across Delhi, Gurugram and
 Noida: three agencies, three record systems that cannot see each other and should not hold each other's
@@ -34,6 +35,30 @@ agents recall it before they link anything.
 | **Promotion to shared knowledge** | An officer's confirmed series or exclusion is written by the curator agent and promoted with `memory_promote` |
 | **Sharing across agencies and agents** | Gurugram's and Noida's sightings reach Delhi's agents through the grid |
 | **Documents** | SOPs in the grid knowledge base; the briefer cites them as next steps |
+
+### Investigation intelligence: from fragmented case records to connected leads
+
+Investigators often have the information they need, spread across an FIR, witness statements, CCTV notes,
+seizure memos, forensic and bank records. The case dossier now reads them together. Six agents each do one job,
+and every lead names the document and quotes the sentence it came from:
+
+| Agent | What it does |
+|---|---|
+| FIR intelligence | Reads the FIR in any of 13 languages (existing CrimeAI reader) |
+| Evidence intelligence | Compares what each document says about the incident: time, date, vehicle number, amount. *"PW-1 says 8 PM; CCTV shows 21:04; difference 1 h 4 min"* |
+| Case linking | Shared phones, UPI IDs, accounts and vehicles across cases, and across agencies through Meko |
+| Timeline | One source-linked chronology from the case record, documents and e-Sakshya; flags stretches of 7+ days with no recorded step |
+| Legal intelligence | IPC to BNS mapping and wrong-code warnings (existing) |
+| Audit | Every decision and every Meko call is logged; findings cite their sources |
+
+An officer **accepts**, **rejects** or marks a finding **needs investigation**. An accepted finding is written to
+Meko as approved context, and the evidence agent recalls it on later cases that share a vehicle: accept a
+transcription error on Saket case DL-INV-2026-001 and it appears on the Malviya Nagar case DL-INV-2026-002.
+Findings are leads for human verification; a shared vehicle or witness never establishes the same offender.
+
+**Measured** on five labelled synthetic cases (Hindi and English, `python scripts/evaluate_investigation.py`):
+5 of 5 planted contradictions and gaps found, 0 false alarms on the two consistent cases, about 6 ms per case.
+It is a small, self-made set, so it shows the agents work as designed, not field accuracy.
 
 Every Meko call is stored in YugabyteDB (`meko_calls`) and shown on the **Shared Memory** page, which also lists
 what each datapack holds and lets an officer **Correct** or **Forget** any memory. Raw phone, UPI and account
@@ -111,7 +136,7 @@ flowchart TD
 | Simulation | District-level what-if for patrols, CCTV, curfew |
 | Integrations | How CrimeAI connects to CCTNS, NCRP, e-Sakshya and ICJS; file import |
 | Shared Memory | Meko: what each datapack holds (correct or forget), agents ↔ datapacks map, every Meko call, demo FIRs |
-| Case Dossier | Custody countdown, linked identifiers, similar cases in any language, e-Sakshya evidence |
+| Case Dossier | Investigation intelligence (documents, contradictions, timeline, officer review), custody countdown, linked identifiers, similar cases in any language, e-Sakshya evidence |
 | Admin | Access requests, users, audit log, model training, system health |
 
 ## Run it locally
