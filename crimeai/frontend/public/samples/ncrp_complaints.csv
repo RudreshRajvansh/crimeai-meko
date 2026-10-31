@@ -1,0 +1,4 @@
+acknowledgement_no,complaint_date,district,police_station,category,amount,suspect_upi,suspect_phone,suspect_account,description
+31209260001234,2026-10-03T10:00:00+05:30,Saket,Cyber PS South,Online job fraud,12000,quickcash.help@okaxis,9812345670,,Paid registration fee for a part-time job offered on Telegram
+31209260001235,2026-10-04T15:30:00+05:30,Dwarka,Cyber PS South West,Investment fraud,250000,,9812345670,50100234567891,Asked to invest in a stock tips group; withdrawals were blocked
+31209260001236,2026-10-05T11:45:00+05:30,Rohini,Cyber PS North West,UPI fraud,8500,quickcash.help@okaxis,,,Sent money to receive a fake refund

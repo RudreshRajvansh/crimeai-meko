@@ -1,0 +1,81 @@
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+ENV/
+.Python
+pip-log.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+
+# ── Node / Frontend ──────────────────────────────────────────────────────────
+node_modules/
+dist/
+dist-ssr/
+*.local
+.pnp
+.pnp.js
+
+# ── Environment & Secrets ────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+.env.*.example
+*.pem
+*.key
+
+# ── Docker volumes ───────────────────────────────────────────────────────────
+yb_data/
+redis_data/
+
+# ── IDE ──────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── ML artefacts ─────────────────────────────────────────────────────────────
+*.pkl
+*.joblib
+*.h5
+*.pt
+*.pth
+models/saved/
+
+# ── spaCy downloaded models ──────────────────────────────────────────────────
+backend/app/nlp/models/*
+!backend/app/nlp/models/.gitkeep
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+logs/
+*.log
+
+# ── ML saved models ──────────────────────────────────────────────────────────
+backend/app/ml/prediction/saved/*.joblib
+backend/app/ml/prediction/saved/*.json
+!backend/app/ml/prediction/saved/.gitkeep
+
+# Runtime state
+celerybeat-schedule*
+backend/var/

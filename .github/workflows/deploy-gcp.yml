@@ -1,0 +1,79 @@
+# Continuous deployment to Google Cloud: every push to main updates the live app.
+#
+# Setup (repository Settings -> Secrets and variables -> Actions):
+#   Variable  GCP_PROJECT_ID   your GCP project id (deploys are skipped until this is set)
+#   Secret    GCP_SA_KEY       JSON key of a service account with roles Compute Admin and Service Account User
+#   Secret    GEMINI_API_KEY   optional, turns on Gemini case briefs
+#
+# The first run creates the VM and firewall, installs Docker and builds everything (15-25 minutes);
+# later runs pull the new code and rebuild only what changed. The live URL is printed at the end.
+name: Deploy to GCP
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-gcp
+  cancel-in-progress: false
+
+env:
+  VM_NAME: crimeai
+  ZONE: ${{ vars.GCP_ZONE || 'asia-south1-a' }}
+  MACHINE_TYPE: ${{ vars.GCP_MACHINE_TYPE || 'e2-standard-4' }}
+
+jobs:
+  deploy:
+    if: vars.GCP_PROJECT_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Create the VM and firewall on the first run
+        run: |
+          gcloud services enable compute.googleapis.com --quiet || true
+          if ! gcloud compute instances describe "$VM_NAME" --zone "$ZONE" >/dev/null 2>&1; then
+            gcloud compute instances create "$VM_NAME" --zone "$ZONE" --machine-type "$MACHINE_TYPE" \
+              --image-family ubuntu-2204-lts --image-project ubuntu-os-cloud --boot-disk-size 60GB \
+              --tags http-server,https-server
+          fi
+          gcloud compute firewall-rules describe crimeai-web >/dev/null 2>&1 || \
+            gcloud compute firewall-rules create crimeai-web --allow tcp:80,tcp:443 \
+              --target-tags http-server,https-server --quiet
+
+      - name: Wait for SSH
+        run: |
+          for i in $(seq 1 30); do
+            gcloud compute ssh "$VM_NAME" --zone "$ZONE" --quiet --command true && exit 0
+            sleep 10
+          done
+          echo "The VM did not accept SSH in time" && exit 1
+
+      - name: Deploy the latest code
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          gcloud compute ssh "$VM_NAME" --zone "$ZONE" --quiet --ssh-flag="-o ServerAliveInterval=30" --command "
+            set -e
+            # Same checkout as the VM's startup script, so secrets and data carry over between deploys.
+            sudo mkdir -p /opt && cd /opt
+            if [ -d CrimeAI ]; then
+              sudo git -C CrimeAI fetch --quiet origin && sudo git -C CrimeAI reset --hard --quiet origin/main
+            else
+              sudo git clone --quiet https://github.com/${{ github.repository }}.git CrimeAI
+            fi
+            cd /opt/CrimeAI && sudo GEMINI_API_KEY='$GEMINI_API_KEY' bash deploy/deploy.sh
+          "
+
+      - name: Live URL
+        run: |
+          ip=$(gcloud compute instances describe "$VM_NAME" --zone "$ZONE" \
+            --format='value(networkInterfaces[0].accessConfigs[0].natIP)')
+          echo "CrimeAI: https://${ip//./-}.sslip.io" | tee -a "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,115 @@
+# Local stack: YugabyteDB (YSQL + pgvector), Redis, API, worker, beat, frontend.
+#   docker compose -f docker-compose.dev.yml up --build
+x-backend-env: &backend-env
+  APP_ENV: development
+  LOG_FORMAT: console
+  DATABASE_URL: postgresql+asyncpg://crimeai:crimeai_dev_password@db:5433/crimeai
+  DATABASE_URL_SYNC: postgresql://crimeai:crimeai_dev_password@db:5433/crimeai
+  YB_APP_ROLE_SUPERUSER: "true"
+  YB_EXTRA_DATABASES: crimeai_test
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/1
+  CELERY_RESULT_BACKEND: redis://redis:6379/2
+  ALLOWED_ORIGINS: http://localhost:5173
+  ALLOWED_HOSTS: "*"
+  REFRESH_COOKIE_SECURE: "false"
+  REFRESH_COOKIE_SAMESITE: lax
+  LOCAL_STORAGE_DIR: /app/var/uploads
+  # Bind mounts from Windows/macOS hosts do not deliver file events; poll so --reload sees edits.
+  WATCHFILES_FORCE_POLLING: "true"
+  ALLOW_SELF_REGISTRATION: "true"
+
+x-backend-env-file: &backend-env-file
+  - path: ./backend/.env
+    required: false
+
+services:
+  # Single-node YugabyteDB. YSQL speaks the PostgreSQL wire protocol on 5433. The cluster UI (15433) is not
+  # published: Windows often reserves that port range; `docker compose port db 15433` after adding it if needed.
+  # Docker Desktop's VM clock drifts past YugabyteDB's 0.5 s skew limit and the tserver then crash-loops;
+  # a wider bound is harmless on one node (production keeps the default).
+  db:
+    image: yugabytedb/yugabyte:2026.1.1.2-b9
+    command: ["bin/yugabyted", "start", "--background=false", "--base_dir=/home/yugabyte/yb_data",
+              "--master_flags=max_clock_skew_usec=10000000", "--tserver_flags=max_clock_skew_usec=10000000"]
+    # Host ports only matter for connecting from your machine; services talk over the compose network.
+    ports: ["${CRIMEAI_DB_PORT:-5433}:5433"]
+    volumes:
+      - yb_data:/home/yugabyte/yb_data
+    healthcheck:
+      test: ["CMD-SHELL", "postgres/bin/pg_isready -h $$(hostname) -p 5433"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+
+  redis:
+    image: redis:7.4-alpine
+    # noeviction: Redis holds refresh-token allow-lists and job queues, which must not be silently evicted.
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction
+    ports: ["${CRIMEAI_REDIS_PORT:-6379}:6379"]
+    volumes: [redis_data:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+
+  migrate:
+    build: { context: ./backend, target: dev }
+    env_file: *backend-env-file
+    environment: *backend-env
+    volumes: [./backend:/app]
+    command: sh -c "python scripts/yb_bootstrap.py && alembic upgrade head"
+    depends_on:
+      db: { condition: service_healthy }
+
+  api:
+    build: { context: ./backend, target: dev }
+    env_file: *backend-env-file
+    environment: *backend-env
+    ports: ["8000:8000"]
+    volumes:
+      - ./backend:/app
+      - uploads:/app/var/uploads
+      - hf_cache:/opt/hf-cache
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  worker:
+    build: { context: ./backend, target: worker }
+    env_file: *backend-env-file
+    environment: *backend-env
+    volumes:
+      - ./backend:/app
+      - uploads:/app/var/uploads
+      - hf_cache:/opt/hf-cache
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  beat:
+    build: { context: ./backend, target: worker }
+    env_file: *backend-env-file
+    environment: *backend-env
+    volumes: [./backend:/app]
+    command: celery -A app.workers.celery_app:celery_app beat --loglevel=INFO --schedule=/tmp/celerybeat-schedule
+    depends_on:
+      redis: { condition: service_healthy }
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+    environment:
+      API_PROXY_TARGET: http://api:8000
+      CHOKIDAR_USEPOLLING: "true"
+    ports: ["5173:5173"]
+    volumes: [./frontend:/app, frontend_node_modules:/app/node_modules]
+
+volumes:
+  yb_data:
+  redis_data:
+  uploads:
+  hf_cache:
+  frontend_node_modules:

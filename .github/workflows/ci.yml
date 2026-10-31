@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches: [main, rudresh_work]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  BACKEND: crimeai/backend
+  FRONTEND: crimeai/frontend
+
+jobs:
+  backend-lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: { python-version: "3.11" }
+      - run: pip install ruff==0.6.9
+      - run: ruff check ${{ env.BACKEND }}
+
+  backend-unit:
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: crimeai/backend } }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: crimeai/backend/requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - run: pytest tests/unit -q --cov=app --cov-report=term-missing:skip-covered
+
+  backend-integration:
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: crimeai/backend } }
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-retries 20
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://crimeai:crimeai_ci@localhost:5432/crimeai_test
+      DATABASE_URL_SYNC: postgresql://crimeai:crimeai_ci@localhost:5432/crimeai_test
+      REDIS_URL: redis://localhost:6379/15
+      CELERY_BROKER_URL: redis://localhost:6379/14
+      CELERY_RESULT_BACKEND: redis://localhost:6379/13
+    steps:
+      - uses: actions/checkout@v5
+      # The stock images ship either PostGIS or pgvector, never both; build the same image production uses.
+      - name: Start Postgres (PostGIS + pgvector)
+        working-directory: crimeai
+        run: |
+          docker build -t crimeai-db -f docker/Dockerfile.db .
+          docker run -d --name db -p 5432:5432 \
+            -e POSTGRES_USER=crimeai -e POSTGRES_PASSWORD=crimeai_ci -e POSTGRES_DB=crimeai_test \
+            -v "$PWD/scripts/db/init_extensions.sql:/docker-entrypoint-initdb.d/01.sql:ro" crimeai-db
+          for i in $(seq 1 60); do docker exec db pg_isready -U crimeai -d crimeai_test && break; sleep 2; done
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: crimeai/backend/requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Migrate up, down, and up again
+        run: alembic upgrade head && alembic downgrade 0001 && alembic upgrade head
+      - run: pytest tests/integration -q
+
+  frontend:
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: crimeai/frontend } }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: crimeai/frontend/package-lock.json
+      - run: npm ci
+      - run: npm run type-check
+      - run: npm run lint
+      - run: npm run build
+
+  docker:
+    runs-on: ubuntu-24.04
+    needs: [backend-unit]
+    strategy:
+      matrix:
+        target: [api, worker]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: crimeai/backend
+          target: ${{ matrix.target }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+
+  dependency-audit:
+    runs-on: ubuntu-24.04
+    # Reported on every run and triaged; not blocking, because new advisories should not break unrelated PRs.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: { python-version: "3.11" }
+      - run: pip install pip-audit && pip-audit -r ${{ env.BACKEND }}/requirements.txt
+      - run: npm audit --omit=dev --audit-level=high
+        working-directory: crimeai/frontend

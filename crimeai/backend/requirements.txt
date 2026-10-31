@@ -1,0 +1,42 @@
+# Runtime dependencies shared by the API and the workers. Pinned for reproducible builds.
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+fastapi==0.141.1
+# Pinned above FastAPI's floor for security fixes (PYSEC-2026-248/249).
+starlette==1.6.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.32
+pydantic[email]==2.9.2
+pydantic-settings==2.5.2
+httpx==0.27.2
+
+sqlalchemy==2.0.35
+asyncpg==0.29.0
+psycopg2-binary==2.9.9
+alembic==1.13.3
+geoalchemy2==0.15.2
+pgvector==0.3.5
+
+redis[hiredis]==5.1.1
+celery[redis]==5.4.0
+slowapi==0.1.9
+
+PyJWT==2.15.0
+bcrypt==4.2.0
+
+numpy==1.26.4
+pandas==2.2.3
+scikit-learn==1.5.2
+joblib==1.4.2
+networkx==3.3
+
+spacy==3.8.2
+sentence-transformers==5.7.0
+torch==2.13.0+cpu
+transformers==5.17.0
+pypdf==6.19.0
+reportlab==4.2.5
+
+structlog==24.4.0
+sentry-sdk[fastapi]==2.14.0
+prometheus-client==0.21.0

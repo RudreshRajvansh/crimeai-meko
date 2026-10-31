@@ -1,0 +1,52 @@
+[project]
+name = "crimeai-backend"
+version = "2.0.0"
+requires-python = ">=3.11"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "C4", "SIM", "ASYNC", "S", "RUF"]
+ignore = [
+    "B008",    # FastAPI dependency defaults are the framework idiom
+    "RUF012",
+    "S101",    # assert is fine in tests
+    "S311",    # random is used for simulation, not security
+    "E501",
+    "RUF001", "RUF002", "RUF003",  # en dashes and multiplication signs in Indian-English FIR text are intentional
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106", "S108", "E402"]
+"scripts/**" = ["S105", "S106"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["ignore::DeprecationWarning"]
+markers = ["integration: requires Postgres (PostGIS + pgvector) and Redis"]
+env = [
+    "APP_ENV=test",
+    "D:DATABASE_URL=postgresql+asyncpg://crimeai:crimeai_dev_password@localhost:5432/crimeai_test",
+    "D:DATABASE_URL_SYNC=postgresql://crimeai:crimeai_dev_password@localhost:5432/crimeai_test",
+    "D:REDIS_URL=redis://localhost:6379/15",
+]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["alembic/*", "tests/*"]
+
+[tool.coverage.report]
+show_missing = true

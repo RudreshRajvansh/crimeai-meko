@@ -1,0 +1,291 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+
+  /* Theme tokens as RGB channels, so Tailwind opacity modifiers (bg-accent-blue/10) keep working.
+     Light is the base; the dark class (default, set in index.html) overrides it. */
+  :root {
+    color-scheme: light;
+    --bg-primary: 244 246 248;
+    --bg-secondary: 255 255 255;
+    --bg-tertiary: 238 241 244;
+    --bg-elevated: 255 255 255;
+    --bg-hover: 233 237 241;
+    --border-subtle: 227 231 236;
+    --border-default: 208 215 222;
+    --border-strong: 140 149 159;
+    --text-primary: 31 35 40;
+    --text-secondary: 87 96 106;
+    --text-muted: 110 119 129;
+    --text-inverse: 255 255 255;
+    --accent-blue: 9 105 218;
+    --accent-light: 9 105 218;
+    --accent-cyan: 26 127 55;
+    --accent-purple: 130 80 223;
+    --accent-amber: 154 103 0;
+    --severity-low: 26 127 55;
+    --severity-low-bg: 218 251 225;
+    --severity-medium: 154 103 0;
+    --severity-medium-bg: 255 248 197;
+    --severity-high: 207 34 46;
+    --severity-high-bg: 255 235 233;
+    --severity-critical: 164 14 38;
+    --severity-critical-bg: 255 235 233;
+    --status-online: 26 127 55;
+    --status-offline: 207 34 46;
+    --status-idle: 154 103 0;
+    --scrollbar-thumb: #d0d7de;
+    --scrollbar-track: #f4f6f8;
+  }
+
+  :root.dark {
+    color-scheme: dark;
+    --bg-primary: 10 12 16;
+    --bg-secondary: 15 17 23;
+    --bg-tertiary: 22 27 34;
+    --bg-elevated: 28 33 40;
+    --bg-hover: 34 40 49;
+    --border-subtle: 33 38 45;
+    --border-default: 48 54 61;
+    --border-strong: 72 79 88;
+    --text-primary: 230 237 243;
+    --text-secondary: 139 148 158;
+    --text-muted: 110 118 129;
+    --text-inverse: 10 12 16;
+    --accent-blue: 31 111 235;
+    --accent-light: 88 166 255;
+    --accent-cyan: 57 211 83;
+    --accent-purple: 137 87 229;
+    --accent-amber: 210 153 34;
+    --severity-low: 63 185 80;
+    --severity-low-bg: 13 33 25;
+    --severity-medium: 210 153 34;
+    --severity-medium-bg: 39 29 0;
+    --severity-high: 248 81 73;
+    --severity-high-bg: 45 15 18;
+    --severity-critical: 255 123 114;
+    --severity-critical-bg: 61 8 20;
+    --status-online: 63 185 80;
+    --status-offline: 248 81 73;
+    --status-idle: 210 153 34;
+    --scrollbar-thumb: #30363d;
+    --scrollbar-track: #0f1117;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar        { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track  { background: var(--scrollbar-track); }
+  ::-webkit-scrollbar-thumb  { background: var(--scrollbar-thumb); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgb(var(--border-strong)); }
+
+}
+
+/* Leaflet classes appear only in Leaflet's own scripts, so Tailwind would purge them inside @layer;
+   these overrides stay as plain CSS. */
+/* Leaflet map dark mode overrides */
+.leaflet-container {
+  background: rgb(var(--bg-secondary)) !important;
+  font-family: 'Inter', sans-serif !important;
+}
+/* Scoped under the container: leaflet.css loads later and resets .leaflet-tile { filter: inherit }.
+   Dark mode inverts the street tiles; light mode shows them as published, slightly muted. */
+.leaflet-container .leaflet-tile { filter: saturate(0.85); }
+.dark .leaflet-container .leaflet-tile { filter: brightness(0.7) saturate(0.8) hue-rotate(180deg) invert(1); }
+.leaflet-control-attribution { background: rgb(var(--bg-secondary) / 0.8) !important; color: rgb(var(--text-secondary)) !important; }
+.leaflet-control-zoom a {
+  background: rgb(var(--bg-tertiary)) !important;
+  color: rgb(var(--text-primary)) !important;
+  border-color: rgb(var(--border-default)) !important;
+}
+.leaflet-control-zoom a:hover { background: rgb(var(--bg-elevated)) !important; }
+.leaflet-popup-content-wrapper, .leaflet-tooltip {
+  background: rgb(var(--bg-tertiary)) !important;
+  color: rgb(var(--text-primary)) !important;
+  border: 1px solid rgb(var(--border-default)) !important;
+  border-radius: 8px !important;
+}
+.leaflet-popup-tip { background: rgb(var(--bg-tertiary)) !important; }
+
+/* Link map: identifiers glow; links flow from an identifier to the cases that mention it. */
+.link-flow { stroke-dasharray: 5 9; animation: link-flow 1.4s linear infinite; }
+@keyframes link-flow { to { stroke-dashoffset: -14; } }
+.link-glyph { display: flex; align-items: center; justify-content: center; font: 700 10px Inter, system-ui, sans-serif; color: #0a0c10; }
+.link-glyph-label {
+  position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 3px; white-space: nowrap;
+  font: 600 10px 'JetBrains Mono', ui-monospace, monospace; color: rgb(var(--text-primary));
+  text-shadow: 0 0 3px rgb(var(--bg-primary)), 0 0 6px rgb(var(--bg-primary));
+}
+@media (prefers-reduced-motion: reduce) { .link-flow { animation: none; } }
+
+@layer components {
+  /* Card */
+  .card {
+    @apply bg-bg-secondary border border-border-default rounded-lg;
+  }
+  .card-elevated {
+    @apply bg-bg-elevated border border-border-default rounded-lg shadow-elevated;
+  }
+
+  /* Badge severity */
+  .badge-low      { @apply bg-severity-low-bg text-severity-low text-xs font-medium px-2 py-0.5 rounded; }
+  .badge-medium   { @apply bg-severity-medium-bg text-severity-medium text-xs font-medium px-2 py-0.5 rounded; }
+  .badge-high     { @apply bg-severity-high-bg text-severity-high text-xs font-medium px-2 py-0.5 rounded; }
+  .badge-critical { @apply bg-severity-critical-bg text-severity-critical text-xs font-medium px-2 py-0.5 rounded; }
+
+  /* Stat value */
+  .stat-value   { @apply text-2xl font-bold text-text-primary tabular-nums; }
+  .stat-label   { @apply text-xs text-text-secondary uppercase tracking-wider; }
+  .stat-change  { @apply text-xs font-medium; }
+
+  /* Input */
+  .input {
+    @apply w-full bg-bg-elevated border border-border-default rounded-md px-3 py-2
+           text-sm text-text-primary placeholder:text-text-muted
+           focus:outline-none focus:ring-1 focus:ring-accent-blue focus:border-accent-blue
+           transition-colors;
+  }
+
+  /* Button variants */
+  .btn-primary {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium
+           bg-accent-blue text-white hover:bg-blue-600 active:bg-blue-700
+           disabled:opacity-50 disabled:cursor-not-allowed transition-colors;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium
+           bg-bg-elevated border border-border-default text-text-primary
+           hover:bg-bg-hover disabled:opacity-50 transition-colors;
+  }
+  .btn-danger {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium
+           bg-severity-high text-white hover:bg-red-600 disabled:opacity-50 transition-colors;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center whitespace-nowrap gap-2 px-3 py-2 rounded-md text-sm
+           text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors;
+  }
+
+  /* Table */
+  .table-wrapper { @apply overflow-x-auto rounded-lg border border-border-default; }
+  .table-base    { @apply w-full text-sm text-left; }
+  .table-head    { @apply text-text-secondary uppercase text-2xs tracking-wider border-b border-border-default; }
+  .table-th      { @apply px-4 py-3 font-medium; }
+  .table-td      { @apply px-4 py-3 text-text-primary; }
+  .table-row     { @apply border-b border-border-subtle hover:bg-bg-hover transition-colors; }
+
+  /* Sidebar nav item */
+  .nav-item {
+    @apply flex items-center gap-3 px-3 py-2 rounded-md text-sm text-text-secondary
+           hover:text-text-primary hover:bg-bg-hover transition-colors cursor-pointer;
+  }
+  .nav-item-active {
+    @apply flex items-center gap-3 px-3 py-2 rounded-md text-sm
+           text-text-primary bg-bg-elevated border border-border-default font-medium;
+  }
+
+  /* Live indicator */
+  .live-dot {
+    @apply w-2 h-2 rounded-full bg-status-online animate-pulse-slow;
+  }
+
+  /* ─── Auth Page Components ─── */
+
+  .auth-input {
+    @apply w-full rounded-lg px-3.5 py-2.5
+           text-sm text-text-primary
+           border transition-all duration-200;
+    background: #0b1118;
+    border-color: rgba(48, 54, 61, 0.6);
+  }
+  .auth-input::placeholder {
+    color: rgba(72, 79, 88, 0.7);
+  }
+  .auth-input:focus {
+    outline: none;
+    border-color: rgb(var(--accent-blue));
+    box-shadow: 0 0 0 1px rgba(31,111,235,0.5), 0 0 8px rgba(31,111,235,0.15);
+    background: #0d1420;
+  }
+  .auth-input.has-error {
+    border-color: rgb(var(--severity-high));
+    box-shadow: 0 0 0 1px rgba(248,81,73,0.3);
+  }
+
+  .auth-select {
+    @apply w-full rounded-lg px-3.5 py-2.5
+           text-sm text-text-primary
+           border transition-all duration-200 appearance-none cursor-pointer;
+    background: #0b1118 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23484f58' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") no-repeat right 12px center;
+    border-color: rgba(48, 54, 61, 0.6);
+  }
+  .auth-select:focus {
+    outline: none;
+    border-color: rgb(var(--accent-blue));
+    box-shadow: 0 0 0 1px rgba(31,111,235,0.5), 0 0 8px rgba(31,111,235,0.15);
+  }
+  .auth-select option {
+    background: #0f1117;
+    color: #e6edf3;
+  }
+
+  .auth-card {
+    @apply rounded-2xl border backdrop-blur-xl;
+    background: rgba(12, 16, 24, 0.85);
+    border-color: rgba(48, 54, 61, 0.5);
+    box-shadow:
+      0 8px 32px rgba(0,0,0,0.7),
+      0 0 80px rgba(31,111,235,0.06),
+      inset 0 1px 0 rgba(255,255,255,0.03);
+  }
+
+  .auth-btn {
+    @apply w-full inline-flex items-center justify-center gap-2.5
+           px-4 py-3 rounded-xl text-sm font-semibold text-white
+           transition-all duration-300 uppercase tracking-wider;
+    background: linear-gradient(135deg, #1d4ed8, #2563eb);
+    box-shadow: 0 0 20px rgba(31,111,235,0.3);
+  }
+  .auth-btn:hover:not(:disabled) {
+    background: linear-gradient(135deg, #2563eb, #3b82f6);
+    box-shadow: 0 0 28px rgba(31,111,235,0.45);
+    transform: translateY(-1px);
+  }
+  .auth-btn:active:not(:disabled) {
+    transform: translateY(0.5px);
+    box-shadow: 0 0 16px rgba(31,111,235,0.25);
+  }
+  .auth-btn:disabled {
+    @apply opacity-60 cursor-not-allowed;
+    transform: none !important;
+  }
+
+  /* Custom dark checkbox for auth pages */
+  .auth-checkbox {
+    @apply appearance-none w-4 h-4 rounded border cursor-pointer transition-all duration-200
+           relative flex-shrink-0;
+    background: #0b1118;
+    border-color: rgba(48, 54, 61, 0.8);
+  }
+  .auth-checkbox:checked {
+    background: rgb(var(--accent-blue));
+    border-color: rgb(var(--accent-blue));
+  }
+  .auth-checkbox:checked::after {
+    content: '';
+    position: absolute;
+    left: 4.5px;
+    top: 1.5px;
+    width: 5px;
+    height: 9px;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+  }
+  .auth-checkbox:focus-visible {
+    outline: 2px solid rgb(var(--accent-blue));
+    outline-offset: 2px;
+  }
+}

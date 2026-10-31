@@ -1,0 +1,107 @@
+# Production stack on one VM: Caddy (HTTPS + built frontend) in front of the API, worker, scheduler,
+# YugabyteDB (YSQL + pgvector) and Redis. Secrets and DOMAIN come from crimeai/.env (deploy/deploy.sh writes it).
+#   docker compose -f docker-compose.prod.yml up -d --build
+x-backend-env: &backend-env
+  APP_ENV: production
+  LOG_FORMAT: json
+  APP_SECRET_KEY: ${APP_SECRET_KEY:?set in crimeai/.env}
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set in crimeai/.env}
+  ENTITY_HASH_KEY: ${ENTITY_HASH_KEY:?set in crimeai/.env}
+  DATABASE_URL: postgresql+asyncpg://crimeai:${POSTGRES_PASSWORD:?set in crimeai/.env}@db:5433/crimeai
+  DATABASE_URL_SYNC: postgresql://crimeai:${POSTGRES_PASSWORD}@db:5433/crimeai
+  YB_ADMIN_URL: postgresql://yugabyte:${YB_ADMIN_PASSWORD:-yugabyte}@db:5433/yugabyte
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/1
+  CELERY_RESULT_BACKEND: redis://redis:6379/2
+  ALLOWED_ORIGINS: https://${DOMAIN:?set in crimeai/.env}
+  ALLOWED_HOSTS: ${DOMAIN},api,localhost,127.0.0.1
+  REFRESH_COOKIE_SECURE: "true"
+  REFRESH_COOKIE_SAMESITE: lax
+  LOCAL_STORAGE_DIR: /app/var/uploads
+  # Caddy is the only client of the API; trust its X-Forwarded-For so rate limits see real users.
+  FORWARDED_ALLOW_IPS: "*"
+  ROUTING_ALLOW_PUBLIC: "true"
+  ALLOW_SELF_REGISTRATION: "true"
+
+x-backend-env-file: &backend-env-file
+  - path: ./backend/.env
+    required: false
+
+services:
+  # Single-node YugabyteDB with YSQL password authentication; add nodes with `yugabyted start --join` to scale out.
+  db:
+    image: yugabytedb/yugabyte:2026.1.1.2-b9
+    restart: unless-stopped
+    command: ["bin/yugabyted", "start", "--background=false", "--base_dir=/home/yugabyte/yb_data",
+              "--tserver_flags=ysql_enable_auth=true"]
+    volumes:
+      - yb_data:/home/yugabyte/yb_data
+    healthcheck:
+      test: ["CMD-SHELL", "postgres/bin/pg_isready -h $$(hostname) -p 5433"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction
+    volumes: [redis_data:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 30
+
+  migrate:
+    build: { context: ./backend, target: api }
+    env_file: *backend-env-file
+    environment: *backend-env
+    command: sh -c "python scripts/yb_bootstrap.py && alembic upgrade head"
+    depends_on:
+      db: { condition: service_healthy }
+
+  api:
+    build: { context: ./backend, target: api }
+    restart: unless-stopped
+    env_file: *backend-env-file
+    environment: *backend-env
+    volumes: [uploads:/app/var/uploads]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  worker:
+    build: { context: ./backend, target: worker }
+    restart: unless-stopped
+    env_file: *backend-env-file
+    environment: *backend-env
+    volumes: [uploads:/app/var/uploads]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  beat:
+    build: { context: ./backend, target: worker }
+    restart: unless-stopped
+    env_file: *backend-env-file
+    environment: *backend-env
+    command: celery -A app.workers.celery_app:celery_app beat --loglevel=INFO --schedule=/tmp/celerybeat-schedule
+    depends_on:
+      redis: { condition: service_healthy }
+
+  web:
+    build: { context: ./frontend, dockerfile: Dockerfile }
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN}
+    ports: ["80:80", "443:443"]
+    volumes: [caddy_data:/data, caddy_config:/config]
+    depends_on: [api]
+
+volumes:
+  yb_data:
+  redis_data:
+  uploads:
+  caddy_data:
+  caddy_config:

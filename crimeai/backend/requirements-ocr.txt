@@ -1,0 +1,5 @@
+# Optional: OCR for scanned FIRs. Requires the tesseract-ocr system package (see Dockerfile worker target).
+pytesseract==0.3.13
+pillow==12.3.0
+# Renders scanned (image-only) PDF pages for OCR; ships its own PDFium binary.
+pypdfium2==4.30.0

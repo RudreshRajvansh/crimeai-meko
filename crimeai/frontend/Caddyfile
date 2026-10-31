@@ -1,0 +1,18 @@
+# DOMAIN is a real hostname (or <ip>.sslip.io): Caddy fetches a Let's Encrypt certificate for it.
+{$DOMAIN} {
+	encode zstd gzip
+
+	# API, live-alert WebSocket and health probes go to FastAPI on the compose network.
+	@backend path /api/* /health /ready
+	handle @backend {
+		reverse_proxy api:8000
+	}
+
+	# Everything else is the single-page app.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+		header /assets/* Cache-Control "public, max-age=31536000, immutable"
+	}
+}

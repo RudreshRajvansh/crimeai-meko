@@ -1,0 +1,36 @@
+[
+  {
+    "fir_number": "0412/2026",
+    "police_station": "Hauz Khas",
+    "district": "Saket",
+    "city": "Delhi",
+    "occurred_at": "2026-09-28T21:40:00+05:30",
+    "registered_at": "2026-09-29T09:10:00+05:30",
+    "acts_sections": "BNS 309(4), 3(5)",
+    "place_of_occurrence": "Outer Ring Road near IIT flyover",
+    "latitude": 28.5494,
+    "longitude": 77.1890,
+    "brief_facts": "Complainant states two men on a black Pulsar without number plate snatched her bag near the flyover and fled towards Munirka. Her phone and Rs 6,000 cash were in the bag. Accused Vikas was arrested on 30.09.2026 and the bag was recovered at his instance.",
+    "accused_arrested_at": "2026-09-30T18:00:00+05:30",
+    "first_remanded_at": "2026-10-01T11:30:00+05:30"
+  },
+  {
+    "fir_number": "0413/2026",
+    "police_station": "Saket",
+    "district": "Saket",
+    "city": "Delhi",
+    "occurred_at": "2026-09-30T13:15:00+05:30",
+    "acts_sections": "BNS 318(4), 61(2)",
+    "brief_facts": "Complainant received a call offering a work-from-home job and paid Rs 45,000 as registration fee to UPI ID quickcash.help@okaxis and to A/c No. 50100234567891. The caller then stopped responding."
+  },
+  {
+    "fir_number": "0414/2026",
+    "police_station": "Malviya Nagar",
+    "district": "Saket",
+    "city": "Delhi",
+    "occurred_at": "2026-10-02T23:05:00+05:30",
+    "acts_sections": "IPC 302",
+    "brief_facts": "Assault reported near the market; the latitude below is unreadable, so this row is reported as an error.",
+    "latitude": "not-a-number"
+  }
+]
