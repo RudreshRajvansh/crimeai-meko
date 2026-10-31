@@ -1,14 +1,19 @@
-"""Evidence document storage. Local disk for development, Supabase Storage (S3-compatible) for deployments."""
+"""
+Evidence document storage. Local disk for development; for deployments, Supabase Storage or any S3-compatible
+object store (DigitalOcean Spaces, Vultr Object Storage), signed with AWS Signature Version 4.
+"""
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -83,7 +88,61 @@ class SupabaseDocumentStore:
         return response.content
 
 
+def sigv4_headers(method: str, host: str, path: str, region: str, access_key: str, secret_key: str,
+                  payload_hash: str, now: datetime, extra: dict[str, str] | None = None) -> dict[str, str]:
+    """Headers for an AWS Signature Version 4 request to an S3-compatible service (no query string)."""
+    amz_date, day = now.strftime("%Y%m%dT%H%M%SZ"), now.strftime("%Y%m%d")
+    headers = {"host": host, "x-amz-content-sha256": payload_hash, "x-amz-date": amz_date,
+               **{k.lower(): v for k, v in (extra or {}).items()}}
+    signed = ";".join(sorted(headers))
+    canonical = "\n".join([method, quote(path, safe="/-_.~"), "", *(f"{k}:{headers[k].strip()}" for k in sorted(headers)),
+                           "", signed, payload_hash])
+    scope = f"{day}/{region}/s3/aws4_request"
+    to_sign = "\n".join(["AWS4-HMAC-SHA256", amz_date, scope, hashlib.sha256(canonical.encode()).hexdigest()])
+    key = f"AWS4{secret_key}".encode()
+    for part in (day, region, "s3", "aws4_request"):
+        key = hmac.new(key, part.encode(), hashlib.sha256).digest()
+    signature = hmac.new(key, to_sign.encode(), hashlib.sha256).hexdigest()
+    headers["authorization"] = (f"AWS4-HMAC-SHA256 Credential={access_key}/{scope}, SignedHeaders={signed}, "
+                                f"Signature={signature}")
+    return headers
+
+
+class S3DocumentStore:
+    """DigitalOcean Spaces, Vultr Object Storage or any S3-compatible bucket, addressed path-style."""
+
+    def __init__(self, endpoint: str, region: str, bucket: str, access_key: str, secret_key: str) -> None:
+        parts = urlsplit(endpoint if "://" in endpoint else f"https://{endpoint}")
+        self.scheme, self.host = parts.scheme, parts.netloc
+        self.region, self.bucket, self.access_key, self.secret_key = region, bucket, access_key, secret_key
+
+    async def _request(self, method: str, key: str, data: bytes = b"", content_type: str | None = None) -> httpx.Response:
+        path = f"/{self.bucket}/{key}"
+        extra = {"content-type": content_type} if content_type else {}
+        headers = sigv4_headers(method, self.host, path, self.region, self.access_key, self.secret_key,
+                                hashlib.sha256(data).hexdigest(), datetime.now(UTC), extra)
+        headers.pop("host")
+        async with httpx.AsyncClient(timeout=30) as client:
+            return await client.request(method, f"{self.scheme}://{self.host}{quote(path, safe='/-_.~')}",
+                                        content=data or None, headers=headers)
+
+    async def put(self, key: str, data: bytes, content_type: str) -> str:
+        response = await self._request("PUT", key, data, content_type)
+        if response.status_code >= 300:
+            raise StorageError("Document upload failed", detail={"status": response.status_code})
+        return f"s3://{key}"
+
+    async def get(self, key: str) -> bytes:
+        response = await self._request("GET", key)
+        if response.status_code >= 300:
+            raise StorageError("Document download failed", detail={"status": response.status_code})
+        return response.content
+
+
 def get_document_store() -> DocumentStore:
+    if settings.STORAGE_BACKEND == "s3":
+        return S3DocumentStore(settings.S3_ENDPOINT, settings.S3_REGION, settings.S3_BUCKET, settings.S3_ACCESS_KEY,
+                               settings.S3_SECRET_KEY)
     if settings.STORAGE_BACKEND == "supabase":
         return SupabaseDocumentStore(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY, settings.SUPABASE_STORAGE_BUCKET)
     return LocalDocumentStore(settings.LOCAL_STORAGE_DIR)

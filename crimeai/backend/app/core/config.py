@@ -81,12 +81,19 @@ class Settings(BaseSettings):
     RATE_LIMIT_ML: str = "20/minute"
     FORWARDED_ALLOW_IPS: str = "127.0.0.1"
 
-    STORAGE_BACKEND: Literal["local", "supabase"] = "local"
+    STORAGE_BACKEND: Literal["local", "supabase", "s3"] = "local"
     LOCAL_STORAGE_DIR: str = "var/uploads"
     MAX_UPLOAD_BYTES: int = 10 * 1024 * 1024
     SUPABASE_URL: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""
     SUPABASE_STORAGE_BUCKET: str = "fir-documents"
+    # S3-compatible object storage: DigitalOcean Spaces (https://blr1.digitaloceanspaces.com, region blr1) or Vultr
+    # Object Storage (https://blr1.vultrobjects.com, region blr1).
+    S3_ENDPOINT: str = ""
+    S3_REGION: str = ""
+    S3_BUCKET: str = ""
+    S3_ACCESS_KEY: str = ""
+    S3_SECRET_KEY: str = ""
 
     SENTRY_DSN: str = ""
     SENTRY_TRACES_SAMPLE_RATE: float = Field(0.1, ge=0.0, le=1.0)
@@ -196,6 +203,10 @@ class Settings(BaseSettings):
             problems.append("ALLOWED_ORIGINS cannot contain '*' when credentials are enabled")
         if self.STORAGE_BACKEND == "supabase" and not (self.SUPABASE_URL and self.SUPABASE_SERVICE_ROLE_KEY):
             problems.append("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for supabase storage")
+        if self.STORAGE_BACKEND == "s3" and not all(
+            (self.S3_ENDPOINT, self.S3_REGION, self.S3_BUCKET, self.S3_ACCESS_KEY, self.S3_SECRET_KEY)
+        ):
+            problems.append("S3_ENDPOINT, S3_REGION, S3_BUCKET, S3_ACCESS_KEY and S3_SECRET_KEY are required for s3 storage")
         if self.ROUTING_ENABLED and not self.ROUTING_ALLOW_PUBLIC and any(
             host in self.ROUTING_URL for host in _PUBLIC_ROUTING_HOSTS
         ):
