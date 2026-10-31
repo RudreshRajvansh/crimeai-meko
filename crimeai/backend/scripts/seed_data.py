@@ -31,8 +31,12 @@ from app.core.security import hash_password
 from app.db.session import create_engine
 from app.models.crime import Crime
 from app.models.fir import FIRReport
+from app.models.investigation import CaseDocument
 from app.models.user import User
 from app.nlp.lexicons import CRIME_TERMS
+from app.nlp.multilingual import analyse
+from app.nlp.privacy.redaction import redact
+from app.services.investigation_demo import demo_cases
 
 RNG = random.Random(2024)
 
@@ -377,6 +381,26 @@ def _operations(now: datetime, officers: list[User], station_officer: User) -> l
     return ops
 
 
+async def _investigation_demo(db: AsyncSession, now: datetime, officer: User) -> int:
+    """Five cases with statements, reports and memos that carry known contradictions (app/services/investigation_demo)."""
+    cases = demo_cases(now)
+    for case in cases:
+        crime = Crime(crime_type=case["crime_type"], severity=case["severity"], district=case["district"], city="Delhi",
+                      latitude=case["lat"], longitude=case["lng"], occurred_at=case["occurred_at"], status="under_investigation",
+                      case_number=case["case_number"], assigned_officer_id=officer.id, description=case["fir"],
+                      location_name=f"{case['district']} market", address=f"{case['district']}, New Delhi")
+        db.add(crime)
+        await db.flush()
+        db.add(FIRReport(fir_number=f"FIR/{case['case_number']}", crime_id=crime.id, submitted_by=officer.id,
+                         incident_date=case["occurred_at"], raw_text=case["fir"], nlp_status="pending",
+                         created_at=case["occurred_at"] + timedelta(hours=2)))
+        for doc_type, title, recorded_at, text_ in case["documents"]:
+            db.add(CaseDocument(crime_id=crime.id, doc_type=doc_type, title=title, recorded_at=recorded_at,
+                                text=redact(text_).text, language=analyse(text_).language, added_by=officer.id))
+    await db.flush()
+    return len(cases)
+
+
 async def seed(db: AsyncSession, n_crimes: int, force: bool) -> None:
     existing = (await db.execute(text("SELECT COUNT(*) FROM users"))).scalar_one()
     if existing and not force:
@@ -468,6 +492,8 @@ async def seed(db: AsyncSession, n_crimes: int, force: bool) -> None:
             incident_date=crime.occurred_at,
             raw_text=_fir_text(crime, language, bns if modern else ipc, "BNS" if modern else "IPC", detail),
             nlp_status="pending",
+            # Registered within hours of the incident, as in life; the timeline agent reads this date.
+            created_at=min(crime.occurred_at + timedelta(hours=RNG.randint(1, 30)), now),
         ))
     recent = next(c for c in crimes if c.occurred_at > BNS_START + timedelta(days=30))
     firs.append(FIRReport(
@@ -479,9 +505,11 @@ async def seed(db: AsyncSession, n_crimes: int, force: bool) -> None:
         nlp_status="pending",
     ))
     db.add_all(firs)
+    investigation_cases = await _investigation_demo(db, now, users["police"])
     await db.commit()
 
-    print(f"Seeded {len(users) + len(officers) - 1} users, {len(crimes)} crimes, {len(firs)} FIRs.")
+    print(f"Seeded {len(users) + len(officers) - 1} users, {len(crimes)} crimes, {len(firs)} FIRs, "
+          f"{investigation_cases} investigation demo cases (DL-INV-2026-001..005).")
     print("Users: admin@ / analyst@ / police@ / readonly@crimeai.example and officer01-05@crimeai.example")
     if not os.environ.get("SEED_PASSWORD"):
         print(f"Generated password for all seed users (shown once): {password}")
