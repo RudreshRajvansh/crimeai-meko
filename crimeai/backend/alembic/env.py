@@ -50,6 +50,8 @@ def do_run_migrations(connection) -> None:
         target_metadata=target_metadata,
         compare_type=True,
         compare_server_default=True,
+        # YugabyteDB: keep DDL transactions small and record progress after each revision.
+        transaction_per_migration=True,
     )
     with context.begin_transaction():
         context.run_migrations()
