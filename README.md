@@ -6,6 +6,52 @@
 
 CrimeAI is an intelligence layer for Indian police stations. It reads FIRs in Indian languages, links cases that share a phone number, UPI ID, bank account or vehicle across stations, finds serial crimes by their method, forecasts risk for the next patrol shift, tracks the BNSS custody deadline for every accused, and simulates a gang's next move with and without police action. Identifiers are stored as keyed hashes and no face or biometric is ever used.
 
+## hackCBS 9.0: shared memory between agencies, on Meko and YugabyteDB
+
+> CrimeAI was first built at InnoHacks 4.0. **What was built at hackCBS 9.0** is everything in this section: the
+> move from PostgreSQL to YugabyteDB, and Meko shared memory between police agencies (`crimeai/backend/app/meko`,
+> the Meko panel on the FIR page, the Shared Memory page, migrations 0010 and 0011).
+
+CrimeAI links FIRs inside one agency's records. A courier-fraud ring in the NCR works across Delhi, Gurugram and
+Noida: three agencies, three record systems that cannot see each other and should not hold each other's
+complainants. **Meko is the memory between them.** Each agency keeps a private datapack; a shared grid datapack
+carries keyed identifier fingerprints, officer-confirmed series and officers' exclusions, and every agency's
+agents recall it before they link anything.
+
+**Persona:** a police officer at a Delhi station registering a courier-customs fraud FIR, written in Hinglish.
+
+| The same FIR | Meko off | Meko on |
+|---|---|---|
+| Caller phone and UPI ID | "Not seen in any other case" | Gurugram GGM-2026-0412 and Noida NOI-2026-0377 saw them; agents propose a series |
+| Bank customer-care number in the FIR | Links two unrelated KYC frauds; raises a local link alert | One officer marks it not a suspect's; promoted to every agency; ignored from then on, and no local alert |
+| A later FIR with a new SIM and UPI ID | Standalone case | Matched to confirmed series SR-DLP-01 by method, with the lead agency and the officer's note |
+
+| Meko use | Why |
+|---|---|
+| **Datapacks as scopes** | Agency datapacks hold redacted case memory; the grid holds only fingerprints, method tags and case refs |
+| **Recall before reasoning** | Intake, linker and briefer agents search the agency datapack and the grid before any link is shown; links are computed only from what Meko returns |
+| **Extracted memories** | The intake conversation goes to Meko, which extracts durable facts into the agency's memory |
+| **Promotion to shared knowledge** | An officer's confirmed series or exclusion is written by the curator agent and promoted with `memory_promote` |
+| **Sharing across agencies and agents** | Gurugram's and Noida's sightings reach Delhi's agents through the grid |
+| **Documents** | SOPs in the grid knowledge base; the briefer cites them as next steps |
+
+Every Meko call is stored in YugabyteDB (`meko_calls`) and shown on the **Shared Memory** page, which also lists
+what each datapack holds and lets an officer **Correct** or **Forget** any memory. Raw phone, UPI and account
+numbers never reach Meko: agencies share HMAC fingerprints keyed with a common grid key.
+
+**Run it (three steps):**
+
+```bash
+git clone <this repository> && cd <this repository>
+echo MEKO_API_KEY=mko_tkn_your_key >> crimeai/backend/.env
+./start.sh        # or start.cmd on Windows: YugabyteDB, demo data, Meko datapacks, SOPs and partner agencies
+```
+
+Then log in as `police@crimeai.example`, open **Shared Memory → Demo FIRs**, and follow [docs/meko/DEMO.md](docs/meko/DEMO.md).
+
+More: [design note](docs/meko/DESIGN.md) · [Meko feature proposal: projected memories](docs/meko/FEATURE_PROPOSAL.md) ·
+[how our coding agents worked on Meko](AGENTS.md).
+
 ## The problem
 
 A gang uses one phone number to cheat people in five districts. Each victim files at a different station, in a different language. Every FIR is recorded, but nobody notices it is the same number five times. Meanwhile an accused in custody walks free on default bail because the 60-day chargesheet deadline slipped.
@@ -41,7 +87,7 @@ flowchart TD
 | Engine | How it decides |
 |---|---|
 | **FIR reader** | Detects the script, then the language (marker words split Hindi from Marathi). Normalises Indic digits, finds crime, weapon, place and legal terms with lexicons, extracts vehicle numbers, phones, UPI IDs, bank accounts and amounts, maps IPC to BNS and warns when an old IPC section is cited for an incident after 1 July 2024. Aadhaar (Verhoeff-checked), phone, PAN, bank and UPI numbers are masked before any text reaches a model. Scanned FIRs are read with Tesseract OCR. |
-| **Embeddings** | `intfloat/multilingual-e5-small` turns each narrative into 384 numbers, so the same method lands close together in any language. Place names are removed first; location is compared separately. Stored in PostgreSQL with pgvector. |
+| **Embeddings** | `intfloat/multilingual-e5-small` turns each narrative into 384 numbers, so the same method lands close together in any language. Place names are removed first; location is compared separately. Stored in YugabyteDB with pgvector (a distributed HNSW index). |
 | **Link graph** | Every identifier becomes a node; two or more cases sharing one are joined, and chains of shared identifiers form a network. Phones, UPI IDs and accounts are stored only as an HMAC-SHA256 keyed hash. A match is a fact, not a prediction. |
 | **Series detector** | Links two cases when they are the same crime type, within 3 km and 21 days, and their narratives are unusually similar for that crime type. The bar is measured on pairs that cannot share a series, and a Hindi-English pair is judged against other cross-language pairs, so a Hindi FIR can join an English series. Linked pairs are merged and pruned until every member fits. |
 | **Hotspot forecaster** | A scikit-learn gradient-boosted model, the one model trained here. It predicts whether a district records a crime in each 6-hour shift from 11 inputs (recent counts, the district's usual rate, shift, weekday, month). Split by time, tested on the newest 20%, compared with a 28-day-average baseline and retrained nightly. Last run: ROC-AUC 0.645 vs 0.622 for the baseline. |
@@ -64,6 +110,7 @@ flowchart TD
 | Swarm | Simulated futures of a network, with patrol and freeze levers |
 | Simulation | District-level what-if for patrols, CCTV, curfew |
 | Integrations | How CrimeAI connects to CCTNS, NCRP, e-Sakshya and ICJS; file import |
+| Shared Memory | Meko: what each datapack holds (correct or forget), agents ↔ datapacks map, every Meko call, demo FIRs |
 | Case Dossier | Custody countdown, linked identifiers, similar cases in any language, e-Sakshya evidence |
 | Admin | Access requests, users, audit log, model training, system health |
 
@@ -94,7 +141,7 @@ Then run the workflow (Actions → Deploy to GCP → Run workflow, or push to `m
 
 **Using Google Cloud Build instead:** in Cloud Build → Triggers, connect this repository with event "Push to branch" `main` and configuration file [`cloudbuild.yaml`](cloudbuild.yaml). Give the trigger's service account **Compute Admin**, **Service Account User** and **Compute OS Admin Login**, and optionally set the substitution `_GEMINI_API_KEY`. It does the same as the workflow; use one or the other.
 
-The workflow runs [`deploy/deploy.sh`](deploy/deploy.sh) on the VM, which can also be run by hand on any Ubuntu server (`GEMINI_API_KEY=... bash deploy/deploy.sh`). The production stack (`crimeai/docker-compose.prod.yml`) runs Caddy with the built frontend, the API, a Celery worker and scheduler, PostgreSQL (PostGIS + pgvector) and Redis.
+The workflow runs [`deploy/deploy.sh`](deploy/deploy.sh) on the VM, which can also be run by hand on any Ubuntu server (`GEMINI_API_KEY=... bash deploy/deploy.sh`). The production stack (`crimeai/docker-compose.prod.yml`) runs Caddy with the built frontend, the API, a Celery worker and scheduler, YugabyteDB (YSQL + pgvector, password authentication on) and Redis.
 
 ## Privacy, law and safety
 
@@ -113,7 +160,7 @@ The app runs on synthetic data: 18 months of Delhi incidents across 9 districts 
 
 ## Tech stack
 
-FastAPI (async Python) · SQLAlchemy 2 · PostgreSQL 16 + PostGIS + pgvector · Redis · Celery · scikit-learn · sentence-transformers (multilingual-e5) · Google Gemini · spaCy · Tesseract · React 18 + TypeScript + Vite + Tailwind · Leaflet · force-directed graph · Docker Compose · Caddy
+FastAPI (async Python) · SQLAlchemy 2 · YugabyteDB 2026.1 (YSQL, PostgreSQL 15 compatible) + pgvector · Redis · Celery · scikit-learn · sentence-transformers (multilingual-e5) · Google Gemini · spaCy · Tesseract · React 18 + TypeScript + Vite + Tailwind · Leaflet · force-directed graph · Docker Compose · Caddy
 
 ## Tests
 
@@ -121,8 +168,29 @@ FastAPI (async Python) · SQLAlchemy 2 · PostgreSQL 16 + PostGIS + pgvector · 
 cd crimeai/backend
 pip install -r requirements-dev.txt
 pytest tests/unit            # no services needed
-pytest tests/integration     # needs PostgreSQL (PostGIS + pgvector) and Redis; DATABASE_URL must name a *_test database
+pytest tests/integration     # needs YugabyteDB and Redis; DATABASE_URL must name a *_test database
 ```
+
+A throwaway YugabyteDB for the integration tests (YSQL on 5433; the bootstrap creates the role, databases and extensions):
+
+```bash
+docker run -d --name yb -p 5433:5433 yugabytedb/yugabyte:2026.1.1.2-b9 bin/yugabyted start --background=false --base_dir=/home/yugabyte/yb_data --master_flags=max_clock_skew_usec=10000000 --tserver_flags=max_clock_skew_usec=10000000
+YB_APP_ROLE_SUPERUSER=true DATABASE_URL_SYNC=postgresql://crimeai:crimeai_dev_password@localhost:5433/crimeai_test python scripts/yb_bootstrap.py
+DATABASE_URL_SYNC=postgresql://crimeai:crimeai_dev_password@localhost:5433/crimeai_test alembic upgrade head
+```
+
+### Why YugabyteDB, and what changed
+
+CrimeAI's records now live in YugabyteDB, a distributed, PostgreSQL-compatible database, so one deployment can grow from a single district server to a multi-node cluster spanning a state without changing the application.
+
+| PostgreSQL feature | YugabyteDB version |
+|---|---|
+| PostGIS `ST_DWithin` radius search | Latitude/longitude bounding box on a range index, then exact haversine distance in SQL (`crime_repository.within_m`) |
+| GiST spatial indexes | `(latitude ASC, longitude ASC)` range index |
+| pgvector HNSW | `ybhnsw`, YugabyteDB's distributed HNSW (same `USING hnsw` DDL) |
+| pg_trgm GIN | `ybgin` (same `USING GIN` DDL) |
+| btree time indexes | Range indexes (`created_at DESC`, `district HASH, occurred_at DESC`) so "newest first" reads scan in order instead of across hash shards (migration 0010) |
+| `POSTGRES_USER` superuser from the image | `scripts/yb_bootstrap.py` creates the role, databases and extensions as the `yugabyte` admin |
 
 CI runs linting, 330+ backend tests, migrations up and down, the frontend type-check, lint and build, and dependency audits.
 
@@ -133,7 +201,7 @@ crimeai/
   backend/       FastAPI app: api, services, ml (forecast, risk, clustering, similarity, series),
                  nlp (multilingual reader, IPC-BNS crosswalk, redaction, Gemini), workers, migrations, tests
   frontend/      React app, production Dockerfile and Caddyfile
-  docker-compose.dev.yml    local stack
+  docker-compose.dev.yml    local stack (YugabyteDB, Redis, API, worker, beat, frontend)
   docker-compose.prod.yml   production stack
 deploy/deploy.sh            one-command VM deployment
 FIR_Organized_5Languages/   FIR sample images in 5 languages
