@@ -4,12 +4,16 @@ Meko access for CrimeAI's agents.
 Agents talk to Meko's MCP server with the MCP Python client over Streamable HTTP. One run (an FIR check, a
 case share, an officer decision) opens one session; every tool call is timed and kept, and the caller
 persists the calls to the meko_calls table so the UI can show exactly what Meko was asked and returned.
-The REST Datapack API is used only for setup chores the docs specify there (creating datapacks, uploading
-knowledge-base files) and as a fallback for promotion.
+Every Meko tool except conversation_create takes a conversation_id, so a run opens one conversation per agent
+and datapack on first use and passes it along. The REST Datapack API is used only for setup chores (listing
+and creating datapacks) and as a fallback for promotion; knowledge-base files go to the presigned S3 form
+that knowledgebase_upload_document returns.
 """
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import json
 import time
 import uuid
@@ -33,20 +37,29 @@ AGENT_TOOLS = {
     "memory_delete_by_id", "memory_delete_all", "memory_promote", "context_search",
     "knowledgebase_search", "conversation_create", "conversation_add_message", "conversation_get",
     "conversation_list", "conversation_update", "conversation_delete", "artifact_put", "artifact_get",
+    "knowledgebase_upload_document", "knowledgebase_document_status",
 }
+# Tools whose calls Meko nests under a conversation (conversation_id is a required argument).
+CONVERSATION_TOOLS = AGENT_TOOLS - {"conversation_create", "conversation_list"}
 CATEGORY = {
     **dict.fromkeys(["memory_add", "memory_update", "conversation_create", "conversation_add_message",
-                     "track_token_usage", "rest:kb-upload", "artifact_put"], "write"),
+                     "track_token_usage", "knowledgebase_upload_document", "rest:kb-s3-upload", "artifact_put"], "write"),
     **dict.fromkeys(["memory_search", "context_search", "knowledgebase_search", "memory_get_all",
-                     "memory_get_by_id", "conversation_get", "conversation_list", "artifact_get"], "recall"),
+                     "memory_get_by_id", "conversation_get", "conversation_list", "artifact_get",
+                     "knowledgebase_document_status"], "recall"),
     **dict.fromkeys(["memory_promote", "rest:promote-memories"], "promote"),
     **dict.fromkeys(["memory_delete_by_id", "memory_delete_all", "conversation_delete"], "delete"),
     "connect": "session",
 }
-TEXT_KEYS = ("memory", "text", "content", "fact", "chunk", "snippet", "page_content", "chunk_text", "document")
+# memory_get_all returns each memory's text under "data".
+TEXT_KEYS = ("memory", "text", "content", "fact", "chunk", "snippet", "page_content", "chunk_text", "document", "data")
 ID_KEYS = ("id", "memory_id", "document_id", "chunk_id", "uuid")
 LIST_KEYS = ("results", "memories", "items", "hits", "chunks", "documents", "data", "matches")
 BUCKETS = ("memory", "knowledge_base", "conversation")
+
+
+# (agent, datapack id) -> Meko conversation id, shared by every run in this process.
+_CONVERSATIONS: dict[tuple[str, str | None], str] = {}
 
 
 class MekoError(RuntimeError):
@@ -105,6 +118,12 @@ def parse_tool_result(res: Any) -> tuple[Any, str | None]:
             data = json.loads(joined) if joined else {}
         except json.JSONDecodeError:
             data = {"text": joined}
+    # Meko's tools return their payload as a JSON string, which MCP wraps as {"result": "<json>"}.
+    if isinstance(data, dict) and set(data) == {"result"} and isinstance(data["result"], str):
+        try:
+            data = json.loads(data["result"])
+        except json.JSONDecodeError:
+            data = {"text": data["result"]}
     if isinstance(data, dict):
         if data.get("error"):
             return data, str(data["error"])[:600]
@@ -254,8 +273,30 @@ class MekoRun:
             return None, _flatten(e)
         return parse_tool_result(res)
 
+    async def _conversation(self, agent: str, dp: str | None) -> str | None:
+        """This agent's conversation in this datapack, created on first use and kept for the process: Meko asks
+        for a consistent conversation per agent, and creating one costs seconds."""
+        key = (agent, self.datapacks.get(dp) if dp else None)
+        if key not in _CONVERSATIONS:
+            res = await self.conversation_create(agent, dp, f"CrimeAI {agent}")
+            conv = res.first("conversation_id", "id") if res.ok else None
+            if not conv:
+                return None
+            _CONVERSATIONS[key] = str(conv)
+        return _CONVERSATIONS[key]
+
+    async def open_conversations(self, pairs: list[tuple[str, str]]) -> None:
+        """Create the conversations a set of parallel calls will need, before they start."""
+        await asyncio.gather(*(self._conversation(agent, dp) for agent, dp in dict.fromkeys(pairs)))
+
     async def call(self, agent: str, tool: str, args: dict, dp: str | None = None) -> Result:
         args = {k: v for k, v in args.items() if v is not None}
+        if isinstance(args.get("metadata"), dict | list):
+            args["metadata"] = json.dumps(args["metadata"], ensure_ascii=False)
+        if tool in CONVERSATION_TOOLS and "conversation_id" not in args:
+            conv = await self._conversation(agent, dp)
+            if conv:
+                args["conversation_id"] = conv
         if dp:
             args["datapack_id"] = self.dp_id(dp)
         if tool in AGENT_TOOLS and "agent_id" not in args:
@@ -290,7 +331,31 @@ class MekoRun:
     async def memory_delete(self, agent: str, dp: str, memory_id: str) -> Result:
         return await self.call(agent, "memory_delete_by_id", {"memory_id": memory_id}, dp)
 
-    async def conversation_create(self, agent: str, dp: str, title: str, metadata: dict | None = None) -> Result:
+    async def kb_upload(self, agent: str, dp: str, filename: str, content: bytes) -> tuple[Result, str | None]:
+        """Ask Meko for a presigned S3 form and post the file to it. Returns the tool result and the document key."""
+        res = await self.call(agent, "knowledgebase_upload_document", {
+            "filename": filename, "size": len(content), "content_hash": hashlib.sha256(content).hexdigest(),
+            "content_head_base64": base64.b64encode(content[:3072]).decode(),
+        }, dp)
+        key = res.first("key", "document_key")
+        url, fields = res.first("url"), res.first("fields")
+        if not res.ok or res.first("already_uploaded") or not url:
+            return res, key
+        t0 = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=60) as http:
+                resp = await http.post(url, data=fields or {}, files={"file": (filename, content)})
+            err = None if resp.status_code < 400 else f"S3 HTTP {resp.status_code}: {resp.text[:200]}"
+        except httpx.HTTPError as e:
+            err = f"{type(e).__name__}: {e}"
+        self._log(agent=agent, tool="rest:kb-s3-upload", datapack=dp, args={"filename": filename, "size": len(content)},
+                  ok=err is None, latency=_ms(t0), summary=err or f"{filename} uploaded", result=None, transport="rest")
+        return Result("rest:kb-s3-upload", dp, err is None, res.data, err, _ms(t0)), key
+
+    async def kb_status(self, agent: str, dp: str, document_key: str) -> Result:
+        return await self.call(agent, "knowledgebase_document_status", {"document_key": document_key}, dp)
+
+    async def conversation_create(self, agent: str, dp: str | None, title: str, metadata: dict | None = None) -> Result:
         return await self.call(agent, "conversation_create", {"title": title, "metadata": metadata, "run_id": self.run_id}, dp)
 
     async def conversation_add_message(self, agent: str, dp: str, conversation_id: str, user_input: str, output: str,

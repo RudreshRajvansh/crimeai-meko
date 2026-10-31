@@ -11,6 +11,7 @@ People make the calls: agents only propose. Everything shown as context is exact
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -84,19 +85,27 @@ class Recall:
 async def _recall(run: MekoRun, identifiers: list[contract.GridIdentifier], tags: list[str], text: str) -> tuple[Recall, list[dict]]:
     rc, steps = Recall(), []
     query = _query(tags, text)
+    # The searches are independent and each takes seconds on Meko, so they run in parallel; results are read
+    # back in a fixed order.
+    await run.open_conversations([(INTAKE, "agency"), ("linker", "grid"), ("briefer", "grid")])
+    own, *by_token, ctx, sop = await asyncio.gather(
+        run.memory_search(INTAKE, "agency", query, limit=5),
+        *(run.memory_search("linker", "grid", ident.token, limit=6) for ident in identifiers[:6]),
+        run.context_search("linker", "grid", query, limit=8),
+        run.kb_search("briefer", "grid", f"Standard operating procedure: {query}", limit=3),
+    )
 
-    r = await run.memory_search(INTAKE, "agency", query, limit=5)
+    r = own
     n = rc.add(r.hits(), "agency", "memory", INTAKE, r.call_id)
     steps.append({"agent": INTAKE, "label": f"Recalled {contract.AGENCIES.get(AGENCY, AGENCY)}'s own memory: {n} item(s)",
                   "calls": [r.call_id], "errors": [r.error] if r.error else []})
 
     calls, errors, n = [], [], 0
-    for ident in identifiers[:6]:
-        r = await run.memory_search("linker", "grid", ident.token, limit=6)
+    for r in by_token:
         n += rc.add(r.hits(), "grid", "memory", "linker", r.call_id)
         calls.append(r.call_id)
         errors += [r.error] if r.error else []
-    r = await run.context_search("linker", "grid", query, limit=8)
+    r = ctx
     calls.append(r.call_id)
     errors += [r.error] if r.error else []
     if r.ok:
@@ -106,7 +115,7 @@ async def _recall(run: MekoRun, identifiers: list[contract.GridIdentifier], tags
     steps.append({"agent": "linker", "label": f"Recalled the shared grid by identifier fingerprint and by method: {n} item(s)",
                   "calls": calls, "errors": errors})
 
-    r = await run.kb_search("briefer", "grid", f"Standard operating procedure: {query}", limit=3)
+    r = sop
     k = rc.add_kb(r.hits("knowledge_base"), r.call_id)
     steps.append({"agent": "briefer", "label": f"Searched the grid's SOP documents: {k} passage(s)", "calls": [r.call_id],
                   "errors": [r.error] if r.error else []})

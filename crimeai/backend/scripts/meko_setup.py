@@ -81,37 +81,38 @@ async def ensure_datapacks(db, log: MekoRun, partners: bool) -> dict[str, str]:
     return out
 
 
-async def upload_sops(log: MekoRun, grid_id: str) -> None:
+async def upload_sops(datapacks: dict[str, str]) -> list[dict]:
     pending = []
-    for doc in sorted((DATA / "sop").glob("*.md")):
-        content = doc.read_bytes()
-        body, err = await rest(log, "POST", f"/datapacks/{grid_id}/knowledge-bases/upload", agent="setup",
-                               label="kb-upload", datapack="grid", files={"file": (doc.name, content, "text/markdown")})
-        if err:
-            (ok if "already" in err.lower() else warn)(f"{doc.name}: {err[:140]}")
-            continue
-        key = find_value(body, ("document_key", "key"))
-        ok(f"{doc.name} uploaded (sha256 {hashlib.sha256(content).hexdigest()[:12]}…)")
-        if key:
-            pending.append((doc.name, key))
-    for _ in range(24):
-        if not pending:
-            return
-        await asyncio.sleep(5)
-        still = []
-        for name, key in pending:
-            body, err = await rest(log, "GET", f"/datapacks/{grid_id}/knowledge-bases/document-status", agent="setup",
-                                   label="kb-status", datapack="grid", params={"document_key": key})
-            status = str(find_value(body, ("status", "state")) or "").lower()
-            if status in ("completed", "complete", "indexed", "ready"):
-                ok(f"{name} indexed")
-            elif status in ("failed", "abandoned", "oversized"):
-                warn(f"{name} indexing {status}")
+    async with open_run(datapacks, "setup") as run:
+        for doc in sorted((DATA / "sop").glob("*.md")):
+            content = doc.read_bytes()
+            res, key = await run.kb_upload("setup", "grid", doc.name, content)
+            if not res.ok:
+                warn(f"{doc.name}: {(res.error or '')[:160]}")
+                continue
+            if res.first("already_uploaded"):
+                ok(f"{doc.name} already in the knowledge base")
             else:
-                still.append((name, key))
-        pending = still
-    for name, _ in pending:
-        warn(f"{name} still indexing; it becomes searchable shortly")
+                ok(f"{doc.name} uploaded (sha256 {hashlib.sha256(content).hexdigest()[:12]}…)")
+            if key:
+                pending.append((doc.name, key))
+        for _ in range(24):
+            if not pending:
+                break
+            await asyncio.sleep(5)
+            still = []
+            for name, key in pending:
+                status = str((await run.kb_status("setup", "grid", key)).first("state", "status") or "").lower()
+                if status in ("completed", "complete", "indexed", "ready", "succeeded", "success"):
+                    ok(f"{name} indexed")
+                elif status in ("failed", "error", "abandoned", "oversized", "rejected"):
+                    warn(f"{name} indexing {status}")
+                else:
+                    still.append((name, key))
+            pending = still
+        for name, _ in pending:
+            warn(f"{name} still indexing; it becomes searchable shortly")
+    return run.calls
 
 
 async def post_partner_history(db, datapacks: dict[str, str]) -> list[dict]:
@@ -137,8 +138,9 @@ async def post_partner_history(db, datapacks: dict[str, str]) -> list[dict]:
                 for mid in ids:
                     db.add(MekoMemory(memory_id=mid, datapack=dp, agent=intake, kind=kind, case_ref=ref, text=submitted))
                 if not res.ok:
-                    warn(f"{ref} -> {dp}: {res.error}")
-            ok(f"{ref} ({contract.AGENCIES[c['agency']]}) posted: {len(tokens)} fingerprint(s), tags {', '.join(tags)}")
+                    warn(f"{ref} -> {dp}: {(res.error or '')[:200]}")
+            if r1.ok and r2.ok:
+                ok(f"{ref} ({contract.AGENCIES[c['agency']]}) posted: {len(tokens)} fingerprint(s), tags {', '.join(tags)}")
     return run.calls
 
 
@@ -162,8 +164,7 @@ async def main(args) -> int:
             log.calls.clear()
 
             print("2. SOP documents -> grid knowledge base")
-            await upload_sops(log, created["grid"])
-            await save_calls(db, log.calls)
+            await save_calls(db, await upload_sops(await load_datapacks(db)))
             await db.commit()
 
             if not args.no_partners:
