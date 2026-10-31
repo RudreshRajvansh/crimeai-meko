@@ -11,6 +11,7 @@ from app.api.v1.endpoints import (
     hotspots,
     integrations,
     intel,
+    meko,
     ml,
     nlp,
     patrol,
@@ -33,6 +34,7 @@ router.include_router(graph.router,       prefix="/graph",      tags=["Link Anal
 router.include_router(hotspots.router,    prefix="/hotspots",   tags=["Hotspots"])
 router.include_router(integrations.router, prefix="/integrations", tags=["Integrations"])
 router.include_router(intel.router,       prefix="/intel",      tags=["Investigative Intelligence"])
+router.include_router(meko.router,        prefix="/meko",       tags=["Meko Shared Memory"])
 router.include_router(ml.router,          prefix="/ml",         tags=["ML Services"])
 router.include_router(nlp.router,         prefix="/nlp",        tags=["NLP Services"])
 router.include_router(patrol.router,      prefix="/patrol",     tags=["Patrol Optimization"])

@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
+from app.core.config import settings
 from app.core.exceptions import AlreadyExistsError, NLPServiceError, ValidationError
 from app.core.logging import get_logger
 from app.db.redis import CacheManager
@@ -31,6 +32,7 @@ logger = get_logger(__name__)
 
 _PROCESS_TASK = "app.workers.tasks.nlp_tasks.process_fir"
 _EMBED_TASK = "app.workers.tasks.ml_tasks.embed_crime"
+_MEKO_SHARE_TASK = "app.workers.tasks.meko_tasks.share_case"
 
 
 class NLPService:
@@ -116,6 +118,8 @@ class NLPService:
                 await publish_alert(self.redis, alert)
             if opened:
                 enqueue(_EMBED_TASK, str(fir.crime_id))
+            if fir.crime_id and settings.meko_enabled:
+                enqueue(_MEKO_SHARE_TASK, str(fir.crime_id))
             return {"status": "completed", "fir_id": str(fir_id), "crime_type": entities["crime_type"],
                     "language": fir.language, "links": len(alerts), "crime_id": str(fir.crime_id) if fir.crime_id else None}
         except Exception as exc:
