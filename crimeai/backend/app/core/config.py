@@ -129,6 +129,17 @@ class Settings(BaseSettings):
     VERTEX_CREDENTIALS_FILE: str = ""
     GEMINI_TIMEOUT_SECONDS: float = 30.0
 
+    # Meko shared memory between agencies (https://docs.mekodata.ai). Off until MEKO_API_KEY is set.
+    MEKO_API_KEY: str = ""
+    MEKO_MCP_URL: str = "https://mcp.mekodata.ai/mcp"
+    MEKO_API_URL: str = "https://api.mekodata.ai/api/v1"
+    MEKO_DATAPACK_PREFIX: str = "crimeai"
+    # This deployment's agency on the grid. Agencies share MEKO_GRID_KEY so the same phone, UPI ID or account
+    # fingerprints identically everywhere; the raw identifier never leaves the agency.
+    MEKO_AGENCY_CODE: str = "DLP"
+    MEKO_GRID_KEY: str = _INSECURE_DEV_SECRET
+    MEKO_TIMEOUT_SECONDS: float = 90.0
+
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: Literal["json", "console"] = "json"
 
@@ -144,6 +155,10 @@ class Settings(BaseSettings):
     def exposes_error_detail(self) -> bool:
         return self.APP_ENV in {"development", "test"}
 
+    @property
+    def meko_enabled(self) -> bool:
+        return bool(self.MEKO_API_KEY)
+
     @model_validator(mode="after")
     def _enforce_deployed_hardening(self) -> Settings:
         if self.APP_ENV not in {"production", "staging"}:
@@ -153,6 +168,8 @@ class Settings(BaseSettings):
             value = getattr(self, name)
             if value == _INSECURE_DEV_SECRET or len(value) < 32:
                 problems.append(f"{name} must be set to a random value of at least 32 characters")
+        if self.meko_enabled and (self.MEKO_GRID_KEY == _INSECURE_DEV_SECRET or len(self.MEKO_GRID_KEY) < 32):
+            problems.append("MEKO_GRID_KEY must be the random key shared by every agency on the grid (32+ characters)")
         if self.ALLOWED_HOSTS == ["*"]:
             problems.append("ALLOWED_HOSTS must list the public hostnames of the API")
         if any(origin == "*" for origin in self.ALLOWED_ORIGINS):

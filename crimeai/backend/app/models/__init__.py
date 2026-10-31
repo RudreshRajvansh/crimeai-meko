@@ -1,3 +1,5 @@
+from app.meko.models import MekoCall, MekoDatapack, MekoExclusion, MekoMemory
+
 from .alert import Alert
 from .audit_log import AuditLog
 from .crime import Crime
@@ -10,5 +12,5 @@ from .user import User
 
 __all__ = [
     "Alert", "AuditLog", "Crime", "Entity", "EntityMention", "EvidenceLink", "FIRReport", "MLArtifact",
-    "ProfileChangeRequest", "User",
+    "MekoCall", "MekoDatapack", "MekoExclusion", "MekoMemory", "ProfileChangeRequest", "User",
 ]
