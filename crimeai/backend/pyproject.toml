@@ -36,11 +36,11 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = ["ignore::DeprecationWarning"]
-markers = ["integration: requires Postgres (PostGIS + pgvector) and Redis"]
+markers = ["integration: requires YugabyteDB (YSQL + pgvector) and Redis"]
 env = [
     "APP_ENV=test",
-    "D:DATABASE_URL=postgresql+asyncpg://crimeai:crimeai_dev_password@localhost:5432/crimeai_test",
-    "D:DATABASE_URL_SYNC=postgresql://crimeai:crimeai_dev_password@localhost:5432/crimeai_test",
+    "D:DATABASE_URL=postgresql+asyncpg://crimeai:crimeai_dev_password@localhost:5433/crimeai_test",
+    "D:DATABASE_URL_SYNC=postgresql://crimeai:crimeai_dev_password@localhost:5433/crimeai_test",
     "D:REDIS_URL=redis://localhost:6379/15",
 ]
 

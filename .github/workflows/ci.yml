@@ -49,28 +49,27 @@ jobs:
         options: --health-cmd "redis-cli ping" --health-interval 5s --health-retries 20
     env:
       APP_ENV: test
-      DATABASE_URL: postgresql+asyncpg://crimeai:crimeai_ci@localhost:5432/crimeai_test
-      DATABASE_URL_SYNC: postgresql://crimeai:crimeai_ci@localhost:5432/crimeai_test
+      DATABASE_URL: postgresql+asyncpg://crimeai:crimeai_ci@localhost:5433/crimeai_test
+      DATABASE_URL_SYNC: postgresql://crimeai:crimeai_ci@localhost:5433/crimeai_test
+      YB_APP_ROLE_SUPERUSER: "true"
       REDIS_URL: redis://localhost:6379/15
       CELERY_BROKER_URL: redis://localhost:6379/14
       CELERY_RESULT_BACKEND: redis://localhost:6379/13
     steps:
       - uses: actions/checkout@v5
-      # The stock images ship either PostGIS or pgvector, never both; build the same image production uses.
-      - name: Start Postgres (PostGIS + pgvector)
-        working-directory: crimeai
+      # The same YugabyteDB image production uses: YSQL (PostgreSQL 15 compatible) with pgvector.
+      - name: Start YugabyteDB
         run: |
-          docker build -t crimeai-db -f docker/Dockerfile.db .
-          docker run -d --name db -p 5432:5432 \
-            -e POSTGRES_USER=crimeai -e POSTGRES_PASSWORD=crimeai_ci -e POSTGRES_DB=crimeai_test \
-            -v "$PWD/scripts/db/init_extensions.sql:/docker-entrypoint-initdb.d/01.sql:ro" crimeai-db
-          for i in $(seq 1 60); do docker exec db pg_isready -U crimeai -d crimeai_test && break; sleep 2; done
+          docker run -d --name db -p 5433:5433 yugabytedb/yugabyte:2026.1.1.2-b9 \
+            bin/yugabyted start --background=false --base_dir=/home/yugabyte/yb_data
+          for i in $(seq 1 90); do docker exec db bash -c 'postgres/bin/pg_isready -h $(hostname) -p 5433' && break; sleep 2; done
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: crimeai/backend/requirements*.txt
       - run: pip install -r requirements-dev.txt
+      - run: python scripts/yb_bootstrap.py
       - name: Migrate up, down, and up again
         run: alembic upgrade head && alembic downgrade 0001 && alembic upgrade head
       - run: pytest tests/integration -q

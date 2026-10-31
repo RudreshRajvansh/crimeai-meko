@@ -1,5 +1,5 @@
 """
-Integration fixtures: a real Postgres (PostGIS + pgvector) and Redis, as in CI.
+Integration fixtures: a real YugabyteDB (YSQL + pgvector) and Redis, as in CI.
 
 Schema comes from `alembic upgrade head` (run by CI before pytest), so tests
 exercise the migrations, triggers and indexes production uses. Each test runs
@@ -11,7 +11,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.pool import NullPool
 
 from app.api.v1.endpoints.auth import CLIENT_HEADER
@@ -19,26 +19,30 @@ from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.core.security import UserRole, create_access_token, hash_password
 from app.db.redis import close_redis_pool, get_redis_pool
-from app.db.session import get_db
+from app.db.session import create_engine, get_db
 from app.main import app
 from app.models.user import User
-
-_TABLES = "alerts, fir_reports, crimes, entities, ml_artifacts, users"
 
 # Every test TRUNCATEs the tables it touches: never let that happen to a real or demo database.
 if not settings.DATABASE_URL.rsplit("/", 1)[-1].split("?")[0].endswith("_test"):
     raise RuntimeError(f"Integration tests need a *_test database, got {settings.DATABASE_URL.rsplit('/', 1)[-1]!r}")
 
-engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
+engine = create_engine(settings.DATABASE_URL, poolclass=NullPool)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
 @pytest_asyncio.fixture
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
     async with engine.begin() as conn:
-        # audit_logs refuses UPDATE, DELETE and TRUNCATE; the test database's superuser lifts that for the reset only.
+        # audit_logs refuses UPDATE, DELETE and TRUNCATE; the test database's superuser lifts that (and foreign-key
+        # checks) for the reset only. DELETE, not TRUNCATE: on YugabyteDB a TRUNCATE recreates each table's tablets,
+        # seconds per table, while these tables only ever hold one test's handful of rows.
         await conn.execute(text("SET LOCAL session_replication_role = replica"))
-        await conn.execute(text(f"TRUNCATE {_TABLES}, audit_logs RESTART IDENTITY CASCADE"))
+        tables = (await conn.execute(text(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'alembic_version'"
+        ))).scalars().all()
+        for table in tables:
+            await conn.execute(text(f'DELETE FROM "{table}"'))  # noqa: S608 - names come from pg_tables
     redis = await get_redis_pool()
     await redis.flushdb()
     limiter.reset()  # in-memory under test; each test gets a fresh login budget
