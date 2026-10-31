@@ -23,11 +23,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from sqlalchemy import func, text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import settings
 from app.core.security import hash_password
+from app.db.session import create_engine
 from app.models.crime import Crime
 from app.models.fir import FIRReport
 from app.models.user import User
@@ -252,7 +253,6 @@ def _crime(crime_type: str, district: str, occurred: datetime, officer: User, **
         city="Delhi",
         latitude=lat,
         longitude=lng,
-        geom=func.ST_SetSRID(func.ST_MakePoint(lng, lat), 4326),
         occurred_at=occurred,
         status=extra.pop("status", RNG.choice(["reported", "under_investigation", "under_investigation", "resolved"])),
         case_number=f"DL-{occurred:%Y}-{secrets.token_hex(4).upper()}",
@@ -495,7 +495,7 @@ async def main() -> None:
     args = parser.parse_args()
     if settings.is_production:
         sys.exit("Refusing to seed a production database.")
-    engine = create_async_engine(settings.DATABASE_URL)
+    engine = create_engine(settings.DATABASE_URL)
     async with async_sessionmaker(engine, expire_on_commit=False)() as db:
         await seed(db, args.crimes, args.force)
     await engine.dispose()
