@@ -1,10 +1,9 @@
-"""Crime ORM model with PostGIS geometry and a pgvector embedding."""
+"""Crime ORM model: plain latitude/longitude (YugabyteDB has no PostGIS) and a pgvector embedding."""
 from __future__ import annotations
 
 import uuid
 from datetime import datetime
 
-from geoalchemy2 import Geometry
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import DateTime, Float, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
@@ -28,7 +27,6 @@ class Crime(Base):
     city: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     latitude: Mapped[float] = mapped_column(Float, nullable=False)
     longitude: Mapped[float] = mapped_column(Float, nullable=False)
-    geom: Mapped[object] = mapped_column(Geometry(geometry_type="POINT", srid=4326), nullable=True)
 
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

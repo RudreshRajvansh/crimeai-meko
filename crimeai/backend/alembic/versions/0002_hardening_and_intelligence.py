@@ -38,7 +38,7 @@ def upgrade() -> None:
         "ix_crimes_open_custody", "crimes", ["accused_arrested_at"],
         postgresql_where=sa.text("accused_arrested_at IS NOT NULL AND chargesheet_filed_at IS NULL"),
     )
-    op.execute("CREATE INDEX ix_crimes_geog ON crimes USING GIST ((geom::geography))")
+    # HNSW maps to YugabyteDB's distributed ybhnsw vector index.
     op.execute(
         "CREATE INDEX ix_crimes_embedding_hnsw ON crimes USING hnsw (embedding vector_cosine_ops) "
         "WITH (m = 16, ef_construction = 64)"
@@ -112,7 +112,6 @@ def downgrade() -> None:
 
     op.drop_index("ix_crimes_district_occurred_at", table_name="crimes")
     op.execute("DROP INDEX IF EXISTS ix_crimes_embedding_hnsw")
-    op.execute("DROP INDEX IF EXISTS ix_crimes_geog")
     op.drop_index("ix_crimes_open_custody", table_name="crimes")
     op.drop_index("ix_crimes_assigned_officer_id", table_name="crimes")
     op.drop_index("ix_crimes_series_id", table_name="crimes")

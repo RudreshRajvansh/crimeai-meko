@@ -1,24 +1,42 @@
 """Persistence and spatial/aggregate queries for crimes."""
 from __future__ import annotations
 
+import math
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from geoalchemy2 import Geography
-from sqlalchemy import and_, cast, extract, func, literal_column, select, true, update
+from sqlalchemy import and_, extract, func, literal_column, select, true, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.crime import Crime
 
 HEATMAP_POINT_LIMIT = 20_000
-# Bare `geography` (no typmod) so the expression matches the functional index on (geom::geography).
-_GEOGRAPHY = Geography(geometry_type=None, spatial_index=False)
 GEOJSON_EXPORT_LIMIT = 10_000
+EARTH_RADIUS_M = 6_371_008.8
 
 
-def _point(latitude: float, longitude: float):
-    return func.ST_SetSRID(func.ST_MakePoint(longitude, latitude), 4326)
+def distance_m(latitude: float, longitude: float):
+    """Great-circle (haversine) distance in metres from a point to each crime, as a SQL expression."""
+    lat1, lat2 = func.radians(Crime.latitude), func.radians(latitude)
+    dlat = lat2 - lat1
+    dlng = func.radians(longitude) - func.radians(Crime.longitude)
+    a = func.power(func.sin(dlat / 2), 2) + func.cos(lat1) * func.cos(lat2) * func.power(func.sin(dlng / 2), 2)
+    return 2 * EARTH_RADIUS_M * func.asin(func.least(1.0, func.sqrt(a)))
+
+
+def within_m(latitude: float, longitude: float, radius_m: float) -> list:
+    """
+    Radius filter for YugabyteDB, which has no PostGIS: a latitude/longitude bounding box first (served by the
+    (latitude, longitude) range index), then the exact haversine distance on the few rows left.
+    """
+    dlat = math.degrees(radius_m / EARTH_RADIUS_M)
+    dlng = dlat / max(math.cos(math.radians(latitude)), 1e-6)
+    return [
+        Crime.latitude.between(latitude - dlat, latitude + dlat),
+        Crime.longitude.between(longitude - dlng, longitude + dlng),
+        distance_m(latitude, longitude) <= radius_m,
+    ]
 
 
 def _window(from_date: datetime | None, to_date: datetime | None) -> list:
@@ -88,13 +106,10 @@ class CrimeRepository:
         crime_type: str | None = None,
         limit: int = 100,
     ) -> list[Crime]:
-        # Matches the functional GiST index on (geom::geography), so this is an index scan in metres.
-        geog = cast(Crime.geom, _GEOGRAPHY)
-        point = cast(_point(latitude, longitude), _GEOGRAPHY)
-        query = select(Crime).where(func.ST_DWithin(geog, point, radius_km * 1000))
+        query = select(Crime).where(*within_m(latitude, longitude, radius_km * 1000))
         if crime_type:
             query = query.where(Crime.crime_type == crime_type)
-        query = query.order_by(func.ST_Distance(geog, point)).limit(limit)
+        query = query.order_by(distance_m(latitude, longitude)).limit(limit)
         return list((await self.db.execute(query)).scalars().all())
 
     async def get_all_coordinates(
@@ -237,7 +252,7 @@ class CrimeRepository:
         ]
 
     async def create(self, latitude: float, longitude: float, **fields: Any) -> Crime:
-        crime = Crime(latitude=latitude, longitude=longitude, geom=_point(latitude, longitude), **fields)
+        crime = Crime(latitude=latitude, longitude=longitude, **fields)
         self.db.add(crime)
         await self.db.flush()
         await self.db.refresh(crime)
@@ -247,8 +262,6 @@ class CrimeRepository:
         current = await self.get_by_id(crime_id)
         if current is None:
             return None
-        if "latitude" in updates or "longitude" in updates:
-            updates["geom"] = _point(updates.get("latitude", current.latitude), updates.get("longitude", current.longitude))
         await self.db.execute(update(Crime).where(Crime.id == crime_id).values(**updates))
         await self.db.refresh(current)
         return current

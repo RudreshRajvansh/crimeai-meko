@@ -1,14 +1,16 @@
-"""Initial schema: users, crimes, fir_reports, alerts, audit_logs, PostGIS, pgvector
+"""Initial schema: users, crimes, fir_reports, alerts, audit_logs, pgvector
+
+Targets YugabyteDB (YSQL, PostgreSQL 15 compatible). YugabyteDB has no PostGIS and no GiST, so crimes keep
+plain latitude/longitude with a range index, and distance is computed in SQL (see crime_repository.within_m).
 
 Revision ID: 0001
-Revises: 
+Revises:
 Create Date: 2025-01-01 00:00:00.000000
 """
 from __future__ import annotations
 
 from alembic import op
 import sqlalchemy as sa
-import geoalchemy2
 from sqlalchemy.dialects import postgresql
 
 revision: str = "0001"
@@ -19,7 +21,6 @@ depends_on = None
 
 def upgrade() -> None:
     # ── Extensions ────────────────────────────────────────────────────────────
-    op.execute("CREATE EXTENSION IF NOT EXISTS postgis")
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
     op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")    # fuzzy text search
     op.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
@@ -57,7 +58,6 @@ def upgrade() -> None:
         sa.Column("city", sa.String(100), nullable=False),
         sa.Column("latitude", sa.Float(), nullable=False),
         sa.Column("longitude", sa.Float(), nullable=False),
-        sa.Column("geom", geoalchemy2.types.Geometry(geometry_type="POINT", srid=4326), nullable=True),
         sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("reported_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("status", sa.String(50), nullable=False, server_default="reported"),
@@ -78,8 +78,8 @@ def upgrade() -> None:
     op.create_index("ix_crimes_status", "crimes", ["status"])
     op.create_index("ix_crimes_case_number", "crimes", ["case_number"], unique=True)
     op.create_index("ix_crimes_cluster_id", "crimes", ["cluster_id"])
-    # Spatial index (GIST) for PostGIS queries
-    op.execute("CREATE INDEX ix_crimes_geom ON crimes USING GIST (geom)")
+    # Range index for the bounding-box prefilter of radius queries (ASC: YugabyteDB's default is HASH on the first column).
+    op.execute("CREATE INDEX ix_crimes_lat_lng ON crimes (latitude ASC, longitude ASC)")
     # Trigram index for description full-text search
     op.execute("CREATE INDEX ix_crimes_description_trgm ON crimes USING GIN (description gin_trgm_ops)")
 

@@ -1,8 +1,6 @@
 """Swarm simulation of a linked pattern's next move."""
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func
-
 from app.models.crime import Crime
 from app.models.entity import Entity, EntityMention
 from app.services.entity_graph import _keyed
@@ -15,7 +13,7 @@ async def _network(db, *, kind: str, crime_type: str) -> Crime:
         lat, lng = 28.60 + i * 0.004, 77.05 + i * 0.003
         crimes.append(Crime(
             crime_type=crime_type, severity=3, city="Delhi", district=("Dwarka", "Janakpuri")[i % 2],
-            latitude=lat, longitude=lng, geom=func.ST_SetSRID(func.ST_MakePoint(lng, lat), 4326),
+            latitude=lat, longitude=lng,
             occurred_at=now - timedelta(days=20 - 4 * i, hours=i), case_number=f"DL-SW-{i}", description="linked",
         ))
     key = "DL8CAF2210" if kind == "vehicle" else _keyed("mule@okaxis")

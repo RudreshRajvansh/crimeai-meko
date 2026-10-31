@@ -25,11 +25,12 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import numpy as np
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.crime import Crime
 from app.models.entity import Entity, EntityMention
+from app.repositories.crime_repository import within_m
 
 STREET_TYPES = {"chain_snatching", "robbery", "burglary", "theft", "vehicle_theft", "assault"}
 MONEY_KINDS = {"upi", "account"}
@@ -80,8 +81,7 @@ async def _cluster(db: AsyncSession, crime_id: uuid.UUID) -> tuple[list[Crime], 
             select(Crime.id).where(
                 Crime.crime_type == seed.crime_type,
                 Crime.occurred_at >= since,
-                func.ST_DWithin(func.Geography(Crime.geom), func.Geography(func.ST_SetSRID(
-                    func.ST_MakePoint(seed.longitude, seed.latitude), 4326)), 1500),
+                *within_m(seed.latitude, seed.longitude, 1500),
             ).order_by(Crime.occurred_at.desc()).limit(25)
         )).scalars().all()
         crime_ids |= set(nearby)

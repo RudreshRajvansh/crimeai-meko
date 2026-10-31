@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 from redis.asyncio import Redis
-from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
@@ -149,7 +148,7 @@ class NLPService:
                 crime = Crime(
                     crime_type=crime_type,
                     severity=min(max(int(entities.get("inferred_severity") or 1), 1), 5),
-                    latitude=lat, longitude=lng, geom=func.ST_SetSRID(func.ST_MakePoint(lng, lat), 4326),
+                    latitude=lat, longitude=lng,
                     district=district, city=(context.get("city") or district or "Unknown")[:100],
                     location_name=(context.get("place") or entities.get("primary_location") or "")[:255] or None,
                     occurred_at=fir.incident_date or datetime.now(UTC),
