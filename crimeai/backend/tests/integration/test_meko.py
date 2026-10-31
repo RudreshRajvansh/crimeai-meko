@@ -7,16 +7,13 @@ the customer-care number and confirms the series; both are promoted. A later FIR
 then matched to the series by method, and the excluded number is ignored, here and in local link alerts.
 """
 import json
-import uuid
-from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from app.core.config import settings
-from app.meko import contract, service
-from app.meko.client import MekoRun
-from app.meko.models import MekoCall, MekoDatapack, MekoExclusion
+from app.meko import contract
+from app.meko.models import MekoCall, MekoExclusion
 from app.models.crime import Crime
 from app.services import entity_graph
 
@@ -33,90 +30,13 @@ PARTNERS = [
 ]
 
 
-class _Text:
-    type = "text"
-
-    def __init__(self, text: str):
-        self.text = text
-
-
-class _Result:
-    def __init__(self, payload: dict):
-        self.content = [_Text(json.dumps(payload))]
-        self.isError = False
-        self.structuredContent = None
-
-
-class FakeMeko:
-    """Answers the Meko tools CrimeAI uses with plausible shapes; search is word overlap."""
-
-    def __init__(self) -> None:
-        self.memories: dict[str, list[dict]] = {}
-        self.calls: list[tuple[str, dict]] = []
-
-    def add(self, dp: str, text: str, promoted: bool = False) -> str:
-        mid = uuid.uuid4().hex
-        self.memories.setdefault(dp, []).append({"id": mid, "memory": text, "promoted": promoted})
-        return mid
-
-    def _search(self, dp: str, query: str, limit: int) -> list[dict]:
-        words = {w.lower() for w in query.replace(",", " ").replace(".", " ").split() if len(w) > 2}
-        scored = []
-        for m in self.memories.get(dp, []):
-            text = m["memory"].lower()
-            hits = sum(1 for w in words if w in text)
-            if hits:
-                scored.append((hits / max(len(words), 1), m))
-        scored.sort(key=lambda s: -s[0])
-        return [{"id": m["id"], "memory": m["memory"], "score": round(s, 3)} for s, m in scored[:limit]]
-
-    async def call_tool(self, tool: str, args: dict) -> _Result:
-        self.calls.append((tool, args))
-        dp, limit = args.get("datapack_id"), args.get("limit", 8)
-        if tool == "memory_add":
-            mid = self.add(dp, args["text"])
-            return _Result({"results": [{"id": mid, "memory": args["text"], "event": "ADD"}]})
-        if tool == "memory_search":
-            return _Result({"results": self._search(dp, args["query"], limit)})
-        if tool == "context_search":
-            return _Result({"memory": {"status": "ok", "results": self._search(dp, args["query"], limit)},
-                            "knowledge_base": {"status": "ok", "results": []}, "conversation": {"status": "ok", "results": []}})
-        if tool == "knowledgebase_search":
-            return _Result({"results": [{"id": "kb1", "content": "Send a debit-freeze request within the golden hour.",
-                                         "score": 0.7, "metadata": {"source": "online-fraud-first-response.md"}}]})
-        if tool == "memory_promote":
-            ids = set(args["memory_ids"])
-            for m in self.memories.get(dp, []):
-                if m["id"] in ids:
-                    m["promoted"] = True
-            return _Result({"inserted_ids": sorted(ids), "updated_ids": [], "not_found_ids": []})
-        if tool == "memory_get_all":
-            items = [m for m in self.memories.get(dp, []) if args.get("promoted") is None or m["promoted"] == args["promoted"]]
-            return _Result({"results": items[-20:], "total": len(items)})
-        if tool == "conversation_create":
-            return _Result({"conversation_id": uuid.uuid4().hex})
-        if tool in ("conversation_add_message", "memory_update", "memory_delete_by_id"):
-            return _Result({"status": "ok"})
-        raise AssertionError(f"unexpected tool {tool}")
-
-
 @pytest.fixture
-async def meko(db_session, monkeypatch):
-    fake = FakeMeko()
-    monkeypatch.setattr(settings, "MEKO_API_KEY", "test-key")
-
-    @asynccontextmanager
-    async def fake_open_run(datapacks, agent="system"):
-        yield MekoRun(datapacks, uuid.uuid4().hex[:12], session=fake)
-
-    monkeypatch.setattr(service, "open_run", fake_open_run)
-    for key in ("agency", "grid", "ggm", "noi"):
-        db_session.add(MekoDatapack(key=key, name=f"crimeai-{key}", datapack_id=f"dp-{key}"))
-    await db_session.commit()
+async def partners(meko):
+    """Gurugram and Noida have already posted their sightings to the grid."""
     for ref, crime_type, text in PARTNERS:
         tokens = [i.token for i in contract.grid_identifiers(text)]
-        fake.add("dp-grid", contract.sighting_memory(ref, None, "2026-10-20", crime_type, contract.mo_tags(text), tokens))
-    return fake
+        meko.add("dp-grid", contract.sighting_memory(ref, None, "2026-10-20", crime_type, contract.mo_tags(text), tokens))
+    return meko
 
 
 def _token(text: str, label_digits: str) -> str:
@@ -130,7 +50,8 @@ async def test_meko_off_returns_nothing_shared(client, auth_headers_police, db_s
     assert resp.json()["status"] == "off" and resp.json()["calls"] == []
 
 
-async def test_recall_decide_and_carry_forward(client, auth_headers_police, db_session, meko):
+async def test_recall_decide_and_carry_forward(client, auth_headers_police, db_session, partners):
+    meko = partners
     first = (await client.post("/api/v1/meko/recall", json={"text": DEMO_1}, headers=auth_headers_police)).json()
     assert first["status"] == "ok"
     linked = {link["ref"] for link in first["analysis"]["links"]}

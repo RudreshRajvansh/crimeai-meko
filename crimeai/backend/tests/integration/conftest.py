@@ -5,7 +5,9 @@ Schema comes from `alembic upgrade head` (run by CI before pytest), so tests
 exercise the migrations, triggers and indexes production uses. Each test runs
 against freshly truncated tables.
 """
+import uuid
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
 import pytest
 import pytest_asyncio
@@ -21,7 +23,11 @@ from app.core.security import UserRole, create_access_token, hash_password
 from app.db.redis import close_redis_pool, get_redis_pool
 from app.db.session import create_engine, get_db
 from app.main import app
+from app.meko import service as meko_service
+from app.meko.client import MekoRun
+from app.meko.models import MekoDatapack
 from app.models.user import User
+from tests.integration.fake_meko import FakeMeko
 
 # Every test TRUNCATEs the tables it touches: never let that happen to a real or demo database.
 if not settings.DATABASE_URL.rsplit("/", 1)[-1].split("?")[0].endswith("_test"):
@@ -121,3 +127,20 @@ def auth_headers_analyst(analyst_user: User) -> dict[str, str]:
 @pytest.fixture
 def auth_headers_readonly(readonly_user: User) -> dict[str, str]:
     return _headers(readonly_user)
+
+
+@pytest_asyncio.fixture
+async def meko(db_session: AsyncSession, monkeypatch) -> FakeMeko:
+    """Meko switched on, with its MCP server replaced by an in-memory stand-in and the four datapacks registered."""
+    fake = FakeMeko()
+    monkeypatch.setattr(settings, "MEKO_API_KEY", "test-key")
+
+    @asynccontextmanager
+    async def fake_open_run(datapacks, agent="system"):
+        yield MekoRun(datapacks, uuid.uuid4().hex[:12], session=fake)
+
+    monkeypatch.setattr(meko_service, "open_run", fake_open_run)
+    for key in ("agency", "grid", "ggm", "noi"):
+        db_session.add(MekoDatapack(key=key, name=f"crimeai-{key}", datapack_id=f"dp-{key}"))
+    await db_session.commit()
+    return fake
