@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { FileText, Send, RefreshCw, CheckCircle, AlertCircle, Clock, Upload, Scale, ShieldCheck, ScanLine, Sparkles, PenLine, Camera, Mic, Square, Loader2 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
@@ -9,6 +10,7 @@ import FIRDetailPanel from '@/components/fir/FIRDetailPanel'
 import { GeminiBriefCard, useGeminiStatus } from '@/components/fir/GeminiBrief'
 import CameraScanDialog from '@/components/fir/CameraScanDialog'
 import RecordMatchPanel from '@/components/fir/RecordMatchPanel'
+import MekoPanel from '@/components/fir/MekoPanel'
 import ContextPanel from '@/components/fir/ContextPanel'
 import CasePlacedCard from '@/components/fir/CasePlacedCard'
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder'
@@ -32,12 +34,24 @@ export default function FIRPage() {
   const [cameraOpen, setCameraOpen] = useState(false)
   const [tracked, setTracked] = useState<{ id: string; number: string } | null>(null)
   const [linkResult, setLinkResult] = useState<LinkCheck | null>(null)
+  const [checkedText, setCheckedText] = useState<string | null>(null)
 
   const linkMutation = useMutation({
-    mutationFn: (text: string) => firApi.linkCheck(text),
+    mutationFn: (text: string) => { setCheckedText(text); return firApi.linkCheck(text) },
     onSuccess: (data) => setLinkResult(data),
     onError: (err) => toast.error(getErrorMessage(err)),
   })
+
+  // A demo FIR opened from the Meko page arrives as navigation state: fill it in and scan it.
+  const location = useLocation()
+  useEffect(() => {
+    const demo = (location.state as { text?: string } | null)?.text
+    if (demo && canSubmit) {
+      setRawText(demo)
+      analyseAll(demo)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
 
   const speechMutation = useMutation({
     mutationFn: (audio: File) => firApi.transcribe(audio),
@@ -321,6 +335,7 @@ ${data.statement}` : data.statement
             ) : analysisResult || geminiResult || linkResult || linkMutation.isPending || geminiMutation.isPending ? (
               <div className="space-y-4">
                 <RecordMatchPanel result={linkResult} pending={linkMutation.isPending} />
+                <MekoPanel text={checkedText} firNumber={firNumber} />
                 {geminiMutation.isPending && (
                   <p className="flex items-center gap-2 text-xs text-accent-purple"><Sparkles size={13} className="animate-pulse" /> Translating and writing the case brief…</p>
                 )}
