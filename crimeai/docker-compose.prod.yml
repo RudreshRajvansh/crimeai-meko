@@ -22,6 +22,13 @@ x-backend-env: &backend-env
   FORWARDED_ALLOW_IPS: "*"
   ROUTING_ALLOW_PUBLIC: "true"
   ALLOW_SELF_REGISTRATION: "true"
+  # Meko: this server is its own agency deployment, with its own datapacks; the grid key is in crimeai/.env.
+  MEKO_GRID_KEY: ${MEKO_GRID_KEY:?set in crimeai/.env}
+  MEKO_DATAPACK_PREFIX: ${MEKO_DATAPACK_PREFIX:-crimeai-prod}
+  # Rows this server mirrors into Tiger Cloud are labelled with its domain.
+  TIGER_DEPLOYMENT: ${DOMAIN}
+  # Solana sealing key, copied to crimeai/secrets by deploy/cloud.py; sealing stays off without it.
+  SOLANA_KEYPAIR_FILE: /app/secrets/solana-devnet.json
 
 x-backend-env-file: &backend-env-file
   - path: ./backend/.env
@@ -66,7 +73,7 @@ services:
     restart: unless-stopped
     env_file: *backend-env-file
     environment: *backend-env
-    volumes: [uploads:/app/var/uploads]
+    volumes: [uploads:/app/var/uploads, ./secrets:/app/secrets:ro]
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
@@ -76,7 +83,7 @@ services:
     restart: unless-stopped
     env_file: *backend-env-file
     environment: *backend-env
-    volumes: [uploads:/app/var/uploads]
+    volumes: [uploads:/app/var/uploads, ./secrets:/app/secrets:ro]
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }

@@ -79,3 +79,6 @@ backend/app/ml/prediction/saved/*.json
 # Runtime state
 celerybeat-schedule*
 backend/var/
+
+# Keys copied to a server by deploy/cloud.py (Solana sealing key)
+secrets/
