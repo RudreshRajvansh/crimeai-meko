@@ -11,6 +11,7 @@ import { useThemeColors } from '@/lib/theme'
 import { cn, crimeTypeLabel, formatDate } from '@/utils'
 import type { CustodyDeadline, Dossier } from '@/types'
 import EvidencePanel from '@/components/intel/EvidencePanel'
+import InvestigationPanel from '@/components/intel/InvestigationPanel'
 
 const RTL_SCRIPTS = new Set(['Arabic'])
 
@@ -63,6 +64,7 @@ export default function DossierPage() {
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <div className="space-y-4 xl:col-span-2">
+          <InvestigationPanel crimeId={c.id} />
           <NarrativeCard data={data} kinds={kinds} />
           {data.legal && data.legal.mapped.length > 0 && <LegalCard data={data} />}
           <EvidencePanel crimeId={c.id} evidence={data.evidence} />
