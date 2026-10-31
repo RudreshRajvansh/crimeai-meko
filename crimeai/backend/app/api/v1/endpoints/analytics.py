@@ -13,6 +13,7 @@ from app.api.v1.dependencies.auth import Analyst, Viewer
 from app.core.config import settings
 from app.db.redis import CacheManager, get_redis
 from app.db.session import get_db
+from app.integrations import tiger
 from app.ml.similarity.embeddings import embed_text
 from app.models.crime import Crime
 from app.models.fir import FIRReport
@@ -148,3 +149,24 @@ def _case(r) -> dict:
         "occurred_at": r.occurred_at.isoformat(),
         "snippet": (r.description or "")[:140],
     }
+
+
+@router.get("/tiger", summary="Crime time series from Tiger Cloud: monthly trend and hour-of-day profile (continuous aggregates)")
+async def tiger_overview(
+    user: Viewer,
+    months: int = Query(12, ge=1, le=60),
+    days: int = Query(90, ge=7, le=730),
+    district: str | None = Query(None, max_length=100),
+) -> dict:
+    if not settings.tiger_enabled:
+        return {"enabled": False}
+    async with tiger.connection() as conn:
+        return await tiger.overview(conn, months=months, days=days, district=district)
+
+
+@router.post("/tiger/sync", summary="Mirror crimes changed since the last sync into the Tiger Cloud hypertable")
+async def tiger_sync(user: Analyst, db: DbDep) -> dict:
+    if not settings.tiger_enabled:
+        return {"enabled": False}
+    async with tiger.connection() as conn:
+        return await tiger.sync(db, conn)

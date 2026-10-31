@@ -147,6 +147,11 @@ class Settings(BaseSettings):
     SOLANA_CLUSTER: str = "devnet"
     SOLANA_KEYPAIR_FILE: str = "var/solana-devnet.json"
 
+    # Tiger Cloud (TimescaleDB) mirror of the crime time series for the trend charts. Off until set.
+    TIGER_DATABASE_URL: str = ""
+    # Label of this deployment's rows, so several deployments can share one Tiger service.
+    TIGER_DEPLOYMENT: str = "local"
+
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: Literal["json", "console"] = "json"
 
@@ -165,6 +170,10 @@ class Settings(BaseSettings):
     @property
     def meko_enabled(self) -> bool:
         return bool(self.MEKO_API_KEY)
+
+    @property
+    def tiger_enabled(self) -> bool:
+        return bool(self.TIGER_DATABASE_URL)
 
     @property
     def solana_enabled(self) -> bool:

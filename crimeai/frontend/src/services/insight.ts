@@ -27,4 +27,22 @@ export const insightApi = {
   timeline: (days = 90) => api.get<TimelinePayload>('/analytics/timeline', { params: { days } }).then((r) => r.data),
   search: (q: string) => api.get<SearchResults>('/analytics/search', { params: { q } }).then((r) => r.data),
   system: () => api.get<SystemStatus>('/system/status').then((r) => r.data),
+  tiger: (params?: { months?: number; days?: number; district?: string }) =>
+    api.get<TigerOverview>('/analytics/tiger', { params, timeout: 60_000 }).then((r) => r.data),
+  tigerSync: () => api.post<{ enabled?: boolean; synced?: number; watermark?: string }>('/analytics/tiger/sync', {}, { timeout: 120_000 }).then((r) => r.data),
+}
+
+export interface TigerOverview {
+  enabled: boolean
+  monthly?: { year: number; month: number; count: number }[]
+  hours?: { hour: number; count: number }[]
+  rows?: number
+  chunks?: number
+  compressed_chunks?: number
+  aggregates?: string[]
+  timescaledb?: string
+  synced_at?: string | null
+  days?: number
+  months?: number
+  district?: string | null
 }

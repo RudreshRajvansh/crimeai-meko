@@ -12,6 +12,7 @@ import { formatNumber, timeAgo, severityBadgeClass } from '@/utils'
 import ShiftForecastPanel from '@/components/intel/ShiftForecastPanel'
 import TemporalHeatGrid from '@/components/charts/TemporalHeatGrid'
 import LanguageBars from '@/components/charts/LanguageBars'
+import TigerTimeSeries from '@/components/charts/TigerTimeSeries'
 import { insightApi } from '@/services/insight'
 
 export default function DashboardPage() {
@@ -104,6 +105,8 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+
+      <TigerTimeSeries />
 
       {/* Bottom row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

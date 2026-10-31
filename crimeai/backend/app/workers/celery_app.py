@@ -19,6 +19,7 @@ celery_app = Celery(
         "app.workers.tasks.nlp_tasks",
         "app.workers.tasks.report_tasks",
         "app.workers.tasks.meko_tasks",
+        "app.workers.tasks.tiger_tasks",
     ],
 )
 
@@ -47,6 +48,7 @@ celery_app.conf.update(
         "app.workers.tasks.nlp_tasks.*": {"queue": "nlp"},
         "app.workers.tasks.report_tasks.*": {"queue": "default"},
         "app.workers.tasks.meko_tasks.*": {"queue": "default"},
+        "app.workers.tasks.tiger_tasks.*": {"queue": "default"},
     },
     beat_schedule={
         "refresh-forecasts-hourly": {
@@ -80,6 +82,10 @@ celery_app.conf.update(
         "meko-exclusions-10min": {
             "task": "app.workers.tasks.meko_tasks.sync_exclusions",
             "schedule": crontab(minute="*/10"),
+        },
+        "tiger-sync-5min": {
+            "task": "app.workers.tasks.tiger_tasks.sync",
+            "schedule": crontab(minute="*/5"),
         },
         "daily-briefing": {
             "task": "app.workers.tasks.report_tasks.generate_daily_briefing",
