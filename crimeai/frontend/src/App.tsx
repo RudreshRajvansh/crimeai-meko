@@ -24,6 +24,7 @@ const IntelPage       = lazy(() => import('@/pages/intel/IntelPage'))
 const LinkAnalysisPage = lazy(() => import('@/pages/intel/LinkAnalysisPage'))
 const DossierPage     = lazy(() => import('@/pages/intel/DossierPage'))
 const ProfilePage     = lazy(() => import('@/pages/profile/ProfilePage'))
+const MekoPage        = lazy(() => import('@/pages/meko/MekoPage'))
 
 export default function App() {
   useSessionBootstrap()
@@ -81,6 +82,9 @@ export default function App() {
         <Route element={<AppLayout title="Swarm" subtitle="Hundreds of simulated futures for one case's network" />}>
           <Route path="/swarm" element={<Suspense fallback={<PageLoader />}><SwarmPage /></Suspense>} />
           <Route path="/swarm/:id" element={<Suspense fallback={<PageLoader />}><SwarmPage /></Suspense>} />
+        </Route>
+        <Route element={<AppLayout title="Shared Memory" subtitle="Meko: what agencies remember together, and every call that built it" />}>
+          <Route path="/meko" element={<Suspense fallback={<PageLoader />}><MekoPage /></Suspense>} />
         </Route>
         <Route element={<AppLayout title="What-If Simulation" subtitle="Monte Carlo crime intervention modelling" />}>
           <Route path="/simulation" element={<Suspense fallback={<PageLoader />}><SimulationPage /></Suspense>} />

@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Map, FileText, Bell, Navigation,
   FlaskConical, Users, ChevronLeft, ChevronRight,
-  Radar, Network, Plug, Orbit,
+  Radar, Network, Plug, Orbit, BrainCircuit,
 } from 'lucide-react'
 import { cn } from '@/utils'
 import { useUIStore } from '@/store/ui'
@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { to: '/intel',       icon: Radar,           label: 'Intelligence',     roles: ['police','analyst','admin'] },
   { to: '/graph',       icon: Network,         label: 'Link Analysis',    roles: ['police','analyst','admin'] },
   { to: '/fir',         icon: FileText,        label: 'FIR Analysis',     roles: ['police','analyst','admin'] },
+  { to: '/meko',        icon: BrainCircuit,    label: 'Shared Memory',    roles: ['police','analyst','admin'] },
   { to: '/alerts',      icon: Bell,            label: 'Alerts',           roles: ['readonly','police','analyst','admin'] },
   { to: '/patrol',      icon: Navigation,      label: 'Patrol Routes',    roles: ['police','admin'] },
   { to: '/integrations', icon: Plug,         label: 'Integrations',     roles: ['police','analyst','admin'] },
