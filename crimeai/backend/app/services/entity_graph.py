@@ -76,29 +76,41 @@ def identifiers_in(text: str) -> list[tuple[str, str, str]]:
     return found
 
 
+def grid_tokens(text: str) -> dict[tuple[str, str], str]:
+    """(kind, local key) -> Meko grid fingerprint, so a local entity can be matched to shared grid knowledge."""
+    from app.meko.contract import fingerprint
+
+    analysis = analyse(text or "")
+    out = {("vehicle", plate): fingerprint("vehicle", plate.upper().replace(" ", "").replace("-", ""))
+           for plate in analysis.vehicles}
+    out |= {("phone", _keyed(p)): fingerprint("phone", p) for p in analysis.phones}
+    out |= {("upi", _keyed(u)): fingerprint("upi", u.lower()) for u in analysis.upi_ids}
+    out |= {("account", _keyed(a)): fingerprint("account", a) for a in accounts_in(text)}
+    return out
+
+
 async def link_crime(db: AsyncSession, crime_id: uuid.UUID, text: str, fir_id: uuid.UUID | None = None,
                      occurred_at: datetime | None = None) -> list[uuid.UUID]:
     """Upsert the entities a narrative mentions and attach them to the case. Returns linked entity ids."""
-    return await link_identifiers(db, crime_id, identifiers_in(text), fir_id, occurred_at)
+    return await link_identifiers(db, crime_id, identifiers_in(text), fir_id, occurred_at, grid=grid_tokens(text))
 
 
 async def link_identifiers(db: AsyncSession, crime_id: uuid.UUID, identifiers: list[tuple[str, str, str]],
                            fir_id: uuid.UUID | None = None, occurred_at: datetime | None = None,
-                           source: str = "nlp") -> list[uuid.UUID]:
+                           source: str = "nlp", grid: dict[tuple[str, str], str] | None = None) -> list[uuid.UUID]:
     """Attach (kind, key, label) identifiers to a case, from a narrative or a structured source such as NCRP."""
     linked: list[uuid.UUID] = []
     seen_at = occurred_at or datetime.now(UTC)
     for kind, key, label in dict.fromkeys(identifiers):
-        stmt = (
-            insert(Entity)
-            .values(kind=kind, key=key, label=label, attributes={}, first_seen=seen_at, last_seen=seen_at)
-            .on_conflict_do_update(
-                constraint="uq_entities_kind_key",
-                set_={"last_seen": func.greatest(Entity.last_seen, seen_at),
-                      "first_seen": func.least(Entity.first_seen, seen_at)},
-            )
-            .returning(Entity.id)
-        )
+        attributes = {"grid": grid[(kind, key)]} if grid and (kind, key) in grid else {}
+        new = insert(Entity).values(kind=kind, key=key, label=label, attributes=attributes, first_seen=seen_at,
+                                    last_seen=seen_at)
+        stmt = new.on_conflict_do_update(
+            constraint="uq_entities_kind_key",
+            set_={"last_seen": func.greatest(Entity.last_seen, seen_at),
+                  "first_seen": func.least(Entity.first_seen, seen_at),
+                  "attributes": Entity.attributes.op("||")(new.excluded.attributes)},
+        ).returning(Entity.id)
         entity_id = (await db.execute(stmt)).scalar_one()
         await db.execute(
             insert(EntityMention)
@@ -130,10 +142,16 @@ async def link_alerts(db: AsyncSession, entity_ids: list[uuid.UUID]) -> list[Ale
     One alert per identifier once it ties together enough separate cases. When more cases join later,
     the same alert is updated and marked unread again instead of stacking a new alert per case.
     """
+    from app.meko.service import excluded_tokens
+
     changed: list[Alert] = []
+    # Identifiers officers have ruled out on the Meko grid (a public helpline, say) never raise a link alert.
+    excluded = await excluded_tokens(db)
     for entity_id in set(entity_ids):
         entity = await db.get(Entity, entity_id)
         if entity is None or entity.case_count < settings.LINK_ALERT_MIN_CASES:
+            continue
+        if excluded and (entity.attributes or {}).get("grid") in excluded:
             continue
         key = f"link:{entity.id}"
         existing = (await db.execute(select(Alert).where(Alert.dedupe_key == key))).scalar_one_or_none()
