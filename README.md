@@ -10,8 +10,10 @@ CrimeAI is an intelligence layer for Indian police stations. It reads FIRs in In
 
 > CrimeAI was first built at InnoHacks 4.0. **What was built at hackCBS 9.0** is everything in this section: the
 > move from PostgreSQL to YugabyteDB, Meko shared memory between police agencies (`crimeai/backend/app/meko`, the
-> Meko panel on the FIR page, the Shared Memory page), and investigation intelligence on the case dossier
-> (contradictions, timeline, officer review), migrations 0010 to 0012. The git history shows the starting point.
+> Meko panel on the FIR page, the Shared Memory page), investigation intelligence on the case dossier
+> (contradictions, timeline, officer review), and the sponsor integrations below (Gemini investigation review,
+> Solana chain of custody, Tiger Cloud time series, DigitalOcean and Vultr deployment), migrations 0010 to 0013.
+> The git history shows the starting point.
 
 CrimeAI links FIRs inside one agency's records. A courier-fraud ring in the NCR works across Delhi, Gurugram and
 Noida: three agencies, three record systems that cannot see each other and should not hold each other's
@@ -59,6 +61,21 @@ Findings are leads for human verification; a shared vehicle or witness never est
 **Measured** on five labelled synthetic cases (Hindi and English, `python scripts/evaluate_investigation.py`):
 5 of 5 planted contradictions and gaps found, 0 false alarms on the two consistent cases, about 6 ms per case.
 It is a small, self-made set, so it shows the agents work as designed, not field accuracy.
+
+### Built with our sponsors' platforms
+
+YugabyteDB stays the system of record; each platform does one job it is good at.
+
+| Platform | What it does in CrimeAI | Where |
+|---|---|---|
+| **Gemini API** | On the case dossier, **Explain with Gemini** reads the same documents as the agents (identifiers masked first) and, for every contradiction or gap, writes what disagrees, an honest likely cause, the record that would settle it (CCTV export, call records, RTO register) and one next step, plus a short plan and the documents missing from the file. It cannot add findings of its own; every request is audited. Also: English briefs and OCR of FIRs in 13 languages. | `app/nlp/gemini.py` |
+| **Solana** | **Chain of custody.** *Seal case file* hashes every document and officer review, builds a Merkle root and anchors it in one Memo transaction (devnet). *Verify* recomputes the hashes from YugabyteDB, names any document changed, added or removed since the seal, and reads the root back from the chain, with an Explorer link. Only hashes go on chain. | `app/services/custody.py`, `app/integrations/solana.py`, migration 0013 |
+| **Tiger Data** | Crimes are mirrored (time, type, district, severity, location only) into a **TimescaleDB hypertable on Tiger Cloud**, with hourly and daily **continuous aggregates** in Indian time and **compression** of chunks older than 90 days. The dashboard's *Time series · Tiger Cloud* card reads only the aggregates; a beat job syncs every five minutes. | `app/integrations/tiger.py`, `scripts/tiger_setup.py` |
+| **DigitalOcean** and **Vultr** | `python deploy/cloud.py up digitalocean` (or `vultr`) creates a Bangalore VM, copies the code and keys over SSH and brings up the production stack with HTTPS. Uploaded FIR scans and evidence can live in **Spaces** or **Vultr Object Storage** (`STORAGE_BACKEND=s3`, AWS Signature V4). | `deploy/cloud.py`, `app/services/storage.py` |
+
+Setup: `GEMINI_API_KEY`, `TIGER_DATABASE_URL` and the `S3_*` settings go in `crimeai/backend/.env` (see
+`.env.example`); `python scripts/solana_setup.py` creates the devnet sealing key, and `python scripts/tiger_setup.py`
+creates the hypertable and backfills it.
 
 Every Meko call is stored in YugabyteDB (`meko_calls`) and shown on the **Shared Memory** page, which also lists
 what each datapack holds and lets an officer **Correct** or **Forget** any memory. Raw phone, UPI and account
@@ -152,6 +169,20 @@ It prints `http://localhost:5173` and the demo login (`admin@crimeai.example`; t
 
 **Gemini (optional):** create `crimeai/backend/.env` with `GEMINI_API_KEY=your-key` from [Google AI Studio](https://aistudio.google.com/apikey) and run `start.cmd` again. Without a key the feature is hidden and nothing leaves the server.
 
+## Deploy on DigitalOcean or Vultr
+
+```bash
+DIGITALOCEAN_TOKEN=... python deploy/cloud.py up digitalocean   # 4 vCPU / 8 GB droplet in blr1, cloud firewall
+VULTR_API_KEY=...      python deploy/cloud.py up vultr          # 4 vCPU / 8 GB instance in blr
+python deploy/cloud.py ship <ip>                                 # redeploy the committed code to an existing VM
+```
+
+`up` creates a billable VM with your SSH key, copies the committed code (without the sample FIR images), the
+service keys from `crimeai/backend/.env` and the Solana sealing key, and runs [`deploy/deploy.sh`](deploy/deploy.sh).
+It prints `https://<ip>.sslip.io` and the demo login when done (15–25 minutes the first time). A production server
+is its own agency on the Meko grid (datapacks `crimeai-prod-*`, its own grid key) and labels its Tiger rows with
+its domain.
+
 ## Deploy on Google Cloud (GitHub Actions)
 
 Every push to `main` deploys the app to a Compute Engine VM through [`.github/workflows/deploy-gcp.yml`](.github/workflows/deploy-gcp.yml). One-time setup in **Settings → Secrets and variables → Actions**:
@@ -185,7 +216,7 @@ The app runs on synthetic data: 18 months of Delhi incidents across 9 districts 
 
 ## Tech stack
 
-FastAPI (async Python) · SQLAlchemy 2 · YugabyteDB 2026.1 (YSQL, PostgreSQL 15 compatible) + pgvector · Redis · Celery · scikit-learn · sentence-transformers (multilingual-e5) · Google Gemini · spaCy · Tesseract · React 18 + TypeScript + Vite + Tailwind · Leaflet · force-directed graph · Docker Compose · Caddy
+FastAPI (async Python) · SQLAlchemy 2 · YugabyteDB 2026.1 (YSQL, PostgreSQL 15 compatible) + pgvector · Meko · Tiger Cloud (TimescaleDB) · Solana · Redis · Celery · scikit-learn · sentence-transformers (multilingual-e5) · Google Gemini · spaCy · Tesseract · React 18 + TypeScript + Vite + Tailwind · Leaflet · force-directed graph · Docker Compose · Caddy
 
 ## Tests
 
