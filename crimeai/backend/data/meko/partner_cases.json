@@ -1,0 +1,34 @@
+[
+  {
+    "agency": "GGM",
+    "case_number": "GGM-2026-0412",
+    "district": "Sector 29",
+    "date": "2026-10-12",
+    "crime_type": "fraud",
+    "text": "Complainant (F, 34) received a call from 90000 11223. The caller said he was from a courier company and that a parcel in her name was held at customs. He asked her to pay a customs clearance fee of Rs 4,999 to UPI ID parcelfee.clear@okdemo. She paid by Google Pay; the number was then switched off."
+  },
+  {
+    "agency": "NOI",
+    "case_number": "NOI-2026-0377",
+    "district": "Sector 62",
+    "date": "2026-10-18",
+    "crime_type": "fraud",
+    "text": "शिकायतकर्ता (पुरुष, 41) को 90000 44556 से कॉल आया। कॉल करने वाले ने कहा कि उनका पार्सल कस्टम में रुका है और ₹6,499 कस्टम फीस UPI आईडी parcelfee.clear@okdemo पर भेजनी होगी। शिकायतकर्ता ने PhonePe से भुगतान किया।"
+  },
+  {
+    "agency": "GGM",
+    "case_number": "GGM-2026-0431",
+    "district": "DLF Phase 3",
+    "date": "2026-10-21",
+    "crime_type": "cybercrime",
+    "text": "Complainant (M, 63) got an SMS that his account will be blocked unless KYC is updated, with 90000 77889 to call. The caller had him install AnyDesk and share the OTP; Rs 38,000 left by IMPS. He then messaged his bank's WhatsApp customer care 90000 55555 to block the card."
+  },
+  {
+    "agency": "NOI",
+    "case_number": "NOI-2026-0391",
+    "district": "Sector 18",
+    "date": "2026-10-26",
+    "crime_type": "cybercrime",
+    "text": "Shikayatkarta (F, 58) ko SMS aaya ki KYC update nahi kiya to account block ho jayega. Usne 90000 77889 pe call kiya, caller ne OTP maanga aur Rs 22,500 kat gaye. Phir usne bank ki WhatsApp customer care 90000 55555 pe card block karwaya."
+  }
+]

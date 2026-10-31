@@ -112,6 +112,17 @@ EOF
   compose exec -T -e LOG_LEVEL=WARNING worker python scripts/bootstrap_demo.py
 }
 
+# Meko shared memory: datapacks, SOPs and partner-agency history. Idempotent; skipped without MEKO_API_KEY.
+init_meko() {
+  if ! grep -qE '^MEKO_API_KEY=\S+' "$ROOT/backend/.env" 2>/dev/null; then
+    say "Meko is off (add MEKO_API_KEY=mko_tkn_... to crimeai/backend/.env and run start again to turn it on)."
+    return
+  fi
+  say "Setting up Meko shared memory (datapacks, SOPs, partner agencies)..."
+  docker compose -f "$COMPOSE_FILE" exec -T -e LOG_LEVEL=WARNING api python scripts/meko_setup.py \
+    || say "Meko setup did not finish; the app still runs. Retry: ./start.sh"
+}
+
 show_summary() {
   local password="(see crimeai/backend/var/demo-credentials.txt)"
   [[ -f "$CRED_FILE" ]] && password="$(sed -n 's/^password:[[:space:]]*//p' "$CRED_FILE" | head -1)"
@@ -150,6 +161,7 @@ case "${1:-up}" in
     compose up -d
     wait_http "$API_URL/health" "API" 15
     init_demo_data
+    init_meko
     wait_http "$APP_URL" "web app" 15
     show_summary
     open_browser ;;

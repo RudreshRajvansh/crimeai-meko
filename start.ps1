@@ -149,6 +149,18 @@ function Initialize-DemoData {
     Compose exec -T -e LOG_LEVEL=WARNING worker python scripts/bootstrap_demo.py
 }
 
+# Meko shared memory: datapacks, SOPs and partner-agency history. Idempotent; skipped without MEKO_API_KEY.
+function Initialize-Meko {
+    $envFile = Join-Path $Root 'backend\.env'
+    if (-not ((Test-Path $envFile) -and (Select-String -Path $envFile -Pattern '^MEKO_API_KEY=\S+' -Quiet))) {
+        Say 'Meko is off (add MEKO_API_KEY=mko_tkn_... to crimeai\backend\.env and run start again to turn it on).'
+        return
+    }
+    Say 'Setting up Meko shared memory (datapacks, SOPs, partner agencies)...'
+    & docker compose -f $ComposeFile exec -T -e LOG_LEVEL=WARNING api python scripts/meko_setup.py
+    if ($LASTEXITCODE -ne 0) { Say 'Meko setup did not finish; the app still runs. Retry: .\start.cmd' }
+}
+
 function Show-Summary {
     $password = '(see crimeai\backend\var\demo-credentials.txt)'
     if (Test-Path $CredFile) {
@@ -197,6 +209,7 @@ switch ($Command) {
         Compose up -d
         Wait-Http "$ApiUrl/health" 'API' 15
         Initialize-DemoData
+        Initialize-Meko
         Wait-Http $AppUrl 'web app' 15
         Show-Summary
         Start-Process $AppUrl
