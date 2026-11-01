@@ -393,23 +393,33 @@ async def open_run(datapacks: dict[str, str], agent: str = "system"):
     if not settings.MEKO_API_KEY:
         raise MekoError("Meko is not configured: set MEKO_API_KEY")
     t0 = time.perf_counter()
-    async with AsyncExitStack() as stack:
-        try:
-            read, write, _ = await stack.enter_async_context(streamablehttp_client(
-                settings.MEKO_MCP_URL, headers=_headers(), timeout=30, sse_read_timeout=settings.MEKO_TIMEOUT_SECONDS))
-            session = await stack.enter_async_context(ClientSession(read, write))
-            await session.initialize()
-        except BaseException as e:
-            if isinstance(e, KeyboardInterrupt | SystemExit | asyncio.CancelledError):
-                raise
-            msg = _flatten(e)
-            run._log(agent=agent, tool="connect", datapack=None, args={"url": settings.MEKO_MCP_URL}, ok=False,
-                     latency=_ms(t0), summary=f"error: {msg[:200]}", result=None)
-            raise MekoError(f"Could not connect to Meko: {msg}", run) from None
-        run._log(agent=agent, tool="connect", datapack=None, args={"url": settings.MEKO_MCP_URL}, ok=True,
-                 latency=_ms(t0), summary="MCP session open", result=None)
-        run.session = session
-        yield run
+    try:
+        async with AsyncExitStack() as stack:
+            try:
+                read, write, _ = await stack.enter_async_context(streamablehttp_client(
+                    settings.MEKO_MCP_URL, headers=_headers(), timeout=30, sse_read_timeout=settings.MEKO_TIMEOUT_SECONDS))
+                session = await stack.enter_async_context(ClientSession(read, write))
+                await session.initialize()
+            except BaseException as e:
+                if isinstance(e, KeyboardInterrupt | SystemExit | asyncio.CancelledError):
+                    raise
+                msg = _flatten(e)
+                run._log(agent=agent, tool="connect", datapack=None, args={"url": settings.MEKO_MCP_URL}, ok=False,
+                         latency=_ms(t0), summary=f"error: {msg[:200]}", result=None)
+                raise MekoError(f"Could not connect to Meko: {msg}", run) from None
+            run._log(agent=agent, tool="connect", datapack=None, args={"url": settings.MEKO_MCP_URL}, ok=True,
+                     latency=_ms(t0), summary="MCP session open", result=None)
+            run.session = session
+            yield run
+    except ExceptionGroup as e:
+        # The transport runs in a task group: when Meko fails mid-run (a 502, a dropped stream) the pending calls are
+        # cancelled and the group's error surfaces here. Callers handle MekoError; anything else is a real bug.
+        if e.subgroup((httpx.HTTPError, OSError)) is None:
+            raise
+        msg = _flatten(e)
+        run._log(agent=agent, tool="session", datapack=None, args={"url": settings.MEKO_MCP_URL}, ok=False,
+                 latency=_ms(t0), summary=f"error: connection dropped: {msg[:180]}", result=None)
+        raise MekoError(f"Meko connection dropped: {msg}", run) from None
 
 
 async def save_calls(db: AsyncSession, calls: list[dict]) -> None:

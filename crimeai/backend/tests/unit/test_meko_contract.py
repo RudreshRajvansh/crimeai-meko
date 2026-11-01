@@ -1,4 +1,6 @@
 """The Meko memory contract: fingerprints, phrasing that survives rewording, and links computed from recall only."""
+import pytest
+
 from app.meko import contract
 from app.meko.client import context_buckets, parse_tool_result, to_hits
 
@@ -99,3 +101,51 @@ def test_parse_tool_result_errors_and_json():
     assert parse_tool_result(_Res("boom", is_error=True))[1] == "boom"
     assert parse_tool_result(_Res('{"detail": "datapack not found"}'))[1] == "datapack not found"
     assert parse_tool_result(_Res("plain", structured={"ok": 1})) == ({"ok": 1}, None)
+
+
+async def test_a_meko_failure_mid_run_becomes_a_meko_error(monkeypatch):
+    """A 502 from Meko after the session opened cancels the pending calls; callers get a MekoError, not a crash."""
+    from contextlib import asynccontextmanager
+
+    import anyio
+    import httpx
+    import mcp
+    import mcp.client.streamable_http as transport
+
+    from app.core.config import settings
+    from app.meko import client
+
+    @asynccontextmanager
+    async def failing_transport(*_args, **_kwargs):
+        async with anyio.create_task_group() as tg:
+            async def post_writer():
+                await anyio.sleep(0.05)
+                request = httpx.Request("POST", "https://mcp.test/mcp")
+                raise httpx.HTTPStatusError("502 Bad Gateway", request=request, response=httpx.Response(502, request=request))
+            tg.start_soon(post_writer)
+            yield None, None, None
+
+    class Session:
+        def __init__(self, *_):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def initialize(self):
+            return None
+
+        async def call_tool(self, *_):
+            await anyio.sleep(5)
+
+    monkeypatch.setattr(settings, "MEKO_API_KEY", "test")
+    monkeypatch.setattr(transport, "streamablehttp_client", failing_transport)
+    monkeypatch.setattr(mcp, "ClientSession", Session)
+    with pytest.raises(client.MekoError) as caught:
+        async with client.open_run({"grid": "dp-grid"}, "linker") as run:
+            await run.memory_search("linker", "grid", "PH-0000000000")
+    assert "connection dropped" in str(caught.value) and "502" in str(caught.value)
+    assert caught.value.run.calls[-1]["tool"] == "session" and not caught.value.run.calls[-1]["ok"]
