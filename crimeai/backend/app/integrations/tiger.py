@@ -11,12 +11,13 @@ identifiers.
 from __future__ import annotations
 
 import asyncio
+import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 
 import asyncpg
-from sqlalchemy import select
+from sqlalchemy import literal, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -37,6 +38,7 @@ SCHEMA = [
         PRIMARY KEY (deployment, crime_id, time))""",
     "SELECT create_hypertable('crime_events', 'time', chunk_time_interval => INTERVAL '30 days', if_not_exists => TRUE)",
     "CREATE TABLE IF NOT EXISTS crimeai_sync (name text PRIMARY KEY, watermark timestamptz NOT NULL, synced_at timestamptz NOT NULL)",
+    "ALTER TABLE crimeai_sync ADD COLUMN IF NOT EXISTS last_id uuid",
     """CREATE MATERIALIZED VIEW IF NOT EXISTS crime_hourly WITH (timescaledb.continuous, timescaledb.materialized_only = false) AS
         SELECT time_bucket(INTERVAL '1 hour', time, 'Asia/Kolkata') AS bucket, deployment, district, crime_type,
                count(*) AS crimes, avg(severity)::real AS avg_severity
@@ -80,15 +82,21 @@ async def ensure_schema(conn: asyncpg.Connection) -> None:
 
 
 async def sync(db: AsyncSession, conn: asyncpg.Connection, *, batch: int = 2000) -> dict[str, Any]:
-    """Mirror crimes changed since the last sync (by updated_at); a changed crime replaces its row."""
+    """
+    Mirror crimes changed since the last sync; a changed crime replaces its row. The cursor is (updated_at, id):
+    rows written in one transaction share updated_at, so a timestamp alone would skip the rest of a batch.
+    """
     name, deployment = f"crimes:{settings.TIGER_DEPLOYMENT}", settings.TIGER_DEPLOYMENT
-    watermark = await conn.fetchval("SELECT watermark FROM crimeai_sync WHERE name = $1", name) or datetime(1970, 1, 1, tzinfo=UTC)
+    state = await conn.fetchrow("SELECT watermark, last_id FROM crimeai_sync WHERE name = $1", name)
+    watermark = state["watermark"] if state else datetime(1970, 1, 1, tzinfo=UTC)
+    last_id = (state["last_id"] if state else None) or uuid.UUID(int=0)
     synced = 0
     while True:
         rows = (await db.execute(
             select(Crime.id, Crime.occurred_at, Crime.crime_type, Crime.district, Crime.severity, Crime.latitude,
                    Crime.longitude, Crime.updated_at)
-            .where(Crime.updated_at > watermark).order_by(Crime.updated_at).limit(batch)
+            .where(tuple_(Crime.updated_at, Crime.id) > tuple_(literal(watermark), literal(last_id)))
+            .order_by(Crime.updated_at, Crime.id).limit(batch)
         )).all()
         if not rows:
             break
@@ -99,10 +107,11 @@ async def sync(db: AsyncSession, conn: asyncpg.Connection, *, batch: int = 2000)
                 (r.occurred_at, deployment, r.id, r.crime_type, r.district or "Unknown", int(r.severity or 1), r.latitude,
                  r.longitude) for r in rows],
                 columns=["time", "deployment", "crime_id", "crime_type", "district", "severity", "latitude", "longitude"])
-            watermark = rows[-1].updated_at
+            watermark, last_id = rows[-1].updated_at, rows[-1].id
             await conn.execute(
-                "INSERT INTO crimeai_sync (name, watermark, synced_at) VALUES ($1, $2, now()) "
-                "ON CONFLICT (name) DO UPDATE SET watermark = EXCLUDED.watermark, synced_at = now()", name, watermark)
+                "INSERT INTO crimeai_sync (name, watermark, last_id, synced_at) VALUES ($1, $2, $3, now()) "
+                "ON CONFLICT (name) DO UPDATE SET watermark = EXCLUDED.watermark, last_id = EXCLUDED.last_id, "
+                "synced_at = now()", name, watermark, last_id)
         synced += len(rows)
         if len(rows) < batch:
             break
