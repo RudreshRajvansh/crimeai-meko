@@ -149,8 +149,9 @@ def ship(ip: str) -> None:
     ssh(ip, "umask 077 && cat > /opt/crimeai/crimeai/backend/.env.deploy", data=env.encode())
     if SOLANA_KEY.is_file():
         say("Sending the Solana sealing key")
-        ssh(ip, "umask 077 && mkdir -p /opt/crimeai/crimeai/secrets && cat > /opt/crimeai/crimeai/secrets/solana-devnet.json",
-            data=SOLANA_KEY.read_bytes())
+        # The API and worker run as uid 10001 (backend Dockerfile): the key stays private to that user.
+        ssh(ip, "umask 077 && mkdir -p /opt/crimeai/crimeai/secrets && cat > /opt/crimeai/crimeai/secrets/solana-devnet.json"
+                " && chown -R 10001:10001 /opt/crimeai/crimeai/secrets", data=SOLANA_KEY.read_bytes())
     say("Running deploy/deploy.sh on the VM (first run: 15-25 minutes)")
     ssh(ip, "cd /opt/crimeai && bash deploy/deploy.sh")
 
