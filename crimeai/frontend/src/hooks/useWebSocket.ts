@@ -8,7 +8,7 @@
  */
 import { useCallback, useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import toast from 'react-hot-toast'
+import { showAlertToast } from '@/components/alerts/AlertToast'
 import { authApi } from '@/services/auth'
 import { isAuthenticated, useAuthStore } from '@/store/auth'
 import { useAlertsStore } from '@/store/alerts'
@@ -70,7 +70,7 @@ export function useWebSocket() {
         incrementUnread()
         queryClient.invalidateQueries({ queryKey: ['alerts'] })
         if (msg.severity === 'critical' || msg.severity === 'high') {
-          toast.error(msg.title, { duration: 8000 })
+          showAlertToast({ title: msg.title, severity: msg.severity, alertType: msg.alert_type, district: msg.district })
         }
       }
     }
