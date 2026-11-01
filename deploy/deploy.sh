@@ -79,6 +79,12 @@ $C up -d
 say "Waiting for the API"
 until $C exec -T api curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; do sleep 5; done
 
+# Before the demo data: every FIR the bootstrap registers is shared with Meko as it is written.
+if grep -q '^MEKO_API_KEY=.' backend/.env 2>/dev/null; then
+  say "Setting up Meko shared memory"
+  $C exec -T -e LOG_LEVEL=WARNING api python scripts/meko_setup.py || say "Meko setup did not finish; rerun this script"
+fi
+
 users=$($C exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" db bash -c \
   'bin/ysqlsh -h $(hostname) -U crimeai -d crimeai -tAc "SELECT count(*) FROM users"' | tr -d '[:space:]')
 if [ "$users" = "0" ]; then
@@ -88,10 +94,6 @@ if [ "$users" = "0" ]; then
   $C exec -T -e LOG_LEVEL=WARNING worker python scripts/bootstrap_demo.py
 fi
 
-if grep -q '^MEKO_API_KEY=.' backend/.env 2>/dev/null; then
-  say "Setting up Meko shared memory"
-  $C exec -T -e LOG_LEVEL=WARNING api python scripts/meko_setup.py || say "Meko setup did not finish; rerun this script"
-fi
 if grep -q '^TIGER_DATABASE_URL=.' backend/.env 2>/dev/null; then
   say "Mirroring crimes into Tiger Cloud"
   $C exec -T -e LOG_LEVEL=WARNING api python scripts/tiger_setup.py || say "Tiger setup did not finish; rerun this script"
