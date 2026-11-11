@@ -15,6 +15,8 @@ CrimeAI is an intelligence layer for Indian police stations. It reads FIRs in In
 > Solana chain of custody, Tiger Cloud time series, DigitalOcean deployment), migrations 0010 to 0013.
 > The git history shows the starting point.
 
+**Live demo:** https://35-200-156-166.sslip.io (Google Cloud, Mumbai). Ask the team for the demo login.
+
 CrimeAI links FIRs inside one agency's records. A courier-fraud ring in the NCR works across Delhi, Gurugram and
 Noida: three agencies, three record systems that cannot see each other and should not hold each other's
 complainants. **Meko is the memory between them.** Each agency keeps a private datapack; a shared grid datapack
