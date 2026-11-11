@@ -180,7 +180,24 @@ python deploy/cloud.py ship <ip>                   # redeploy the committed code
 service keys from `crimeai/backend/.env` and the Solana sealing key, and runs [`deploy/deploy.sh`](deploy/deploy.sh).
 It prints `https://<ip>.sslip.io` and the demo login when done (15–25 minutes the first time). A production server
 is its own agency on the Meko grid (datapacks `crimeai-prod-*`, its own grid key) and labels its Tiger rows with
-its domain.
+its domain. To run two servers at once, ship the second with `MEKO_DATAPACK_PREFIX=...` so they never share
+datapacks (Meko's free plan caps how many datapacks an account can create).
+
+## Deploy on Google Cloud from your machine
+
+The hackCBS demo server runs this way: a Compute Engine VM in Mumbai, shipped with the same `cloud.py ship`.
+
+```bash
+gcloud compute firewall-rules create crimeai-web --allow tcp:80,tcp:443 --target-tags http-server,https-server  # once
+gcloud compute instances create crimeai-meko --zone asia-south1-a --machine-type e2-standard-4 \
+  --image-family ubuntu-2404-lts-amd64 --image-project ubuntu-os-cloud --boot-disk-size 60GB \
+  --tags http-server,https-server --scopes cloud-platform \
+  --metadata ssh-keys="deployer:$(cut -d' ' -f1,2 ~/.ssh/id_ed25519.pub) deployer"
+python deploy/cloud.py ship deployer@<external-ip>
+```
+
+`ship` logs in as `deployer` and runs everything through `sudo`. The `cloud-platform` scope lets the VM's service
+account call Vertex AI, which `deploy/deploy.sh` sets up as the backup for the Gemini API key.
 
 ## Deploy on Google Cloud (GitHub Actions)
 

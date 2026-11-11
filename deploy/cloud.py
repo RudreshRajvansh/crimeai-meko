@@ -6,6 +6,7 @@ workers, YugabyteDB, Redis) through deploy/deploy.sh. DIGITALOCEAN_TOKEN in the 
   python deploy/cloud.py up                  # create the droplet, then ship
   python deploy/cloud.py create              # only create the droplet and print its address
   python deploy/cloud.py ship 203.0.113.10   # copy the code and keys to an existing droplet and (re)deploy
+  python deploy/cloud.py ship deployer@203.0.113.10   # any other Ubuntu VM, e.g. Google Cloud (a user with sudo)
 
 `up` and `create` create a billable droplet: 4 vCPU / 8 GB in blr1, with your SSH public key
 (~/.ssh/id_ed25519.pub or id_rsa.pub) and a cloud firewall that allows only SSH, HTTP and HTTPS. `ship` sends the
@@ -43,7 +44,7 @@ def api(method: str, path: str, body: dict | None = None) -> dict:
     token = os.environ.get("DIGITALOCEAN_TOKEN")
     if not token:
         sys.exit("Set DIGITALOCEAN_TOKEN (an API token from the DigitalOcean control panel) in the environment.")
-    req = urllib.request.Request(f"{API}{path}", method=method, data=json.dumps(body).encode() if body else None,
+    req = urllib.request.Request(f"{API}{path}", method=method, data=json.dumps(body).encode() if body else None,  # noqa: S310
                                  headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 - fixed https API endpoint
@@ -95,12 +96,15 @@ def create() -> str:
     sys.exit(f"SSH to root@{ip} did not come up; retry with: python deploy/cloud.py ship {ip}")
 
 
-def ssh(ip: str, command: str, *, data: bytes | None = None, check: bool = True, quiet: bool = False) -> int:
-    args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=10", f"root@{ip}", command]
+def ssh(host: str, command: str, *, data: bytes | None = None, check: bool = True, quiet: bool = False) -> int:
+    """Run a command on `host` ([user@]address, root by default) as root, through sudo for other users."""
+    target = host if "@" in host else f"root@{host}"
+    args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=30",
+            target, f"sudo sh -c '{command}'"]
     out = subprocess.run(args, input=data, stdout=subprocess.DEVNULL if quiet else None,  # noqa: S603
                          stderr=subprocess.DEVNULL if quiet else None)
     if check and out.returncode != 0:
-        sys.exit(f"ssh root@{ip} '{command[:60]}' failed ({out.returncode})")
+        sys.exit(f"ssh {target} '{command[:60]}' failed ({out.returncode})")
     return out.returncode
 
 
@@ -115,7 +119,7 @@ def shipped_env() -> str:
 
 
 def ship(ip: str) -> None:
-    say(f"Copying the committed code to root@{ip}:/opt/crimeai")
+    say(f"Copying the committed code to {ip}:/opt/crimeai")
     archive = subprocess.run(["git", "-C", str(ROOT), "archive", "--format=tar", "HEAD", "--", ".",  # noqa: S603, S607
                               ":(exclude)FIR_Organized_5Languages"], capture_output=True, check=True).stdout
     ssh(ip, "mkdir -p /opt/crimeai && tar -x -C /opt/crimeai", data=archive)
@@ -127,8 +131,10 @@ def ship(ip: str) -> None:
         # The API and worker run as uid 10001 (backend Dockerfile): the key stays private to that user.
         ssh(ip, "umask 077 && mkdir -p /opt/crimeai/crimeai/secrets && cat > /opt/crimeai/crimeai/secrets/solana-devnet.json"
                 " && chown -R 10001:10001 /opt/crimeai/crimeai/secrets", data=SOLANA_KEY.read_bytes())
-    say("Running deploy/deploy.sh on the droplet (first run: 15-25 minutes)")
-    ssh(ip, "cd /opt/crimeai && bash deploy/deploy.sh")
+    say("Running deploy/deploy.sh on the server (first run: 15-25 minutes)")
+    prefix = os.environ.get("MEKO_DATAPACK_PREFIX", "")
+    ssh(ip, f"cd /opt/crimeai && MEKO_DATAPACK_PREFIX={prefix} bash deploy/deploy.sh" if prefix
+        else "cd /opt/crimeai && bash deploy/deploy.sh")
 
 
 def main() -> None:

@@ -42,6 +42,8 @@ ENTITY_HASH_KEY=$(rnd)
 MEKO_GRID_KEY=$(rnd)
 DEMO_PASSWORD=Demo-$(openssl rand -hex 6)
 ENV
+  # Each server gets its own Meko datapacks (<prefix>-dlp, <prefix>-grid, ...) so two servers never mix memories.
+  if [ -n "${MEKO_DATAPACK_PREFIX:-}" ]; then echo "MEKO_DATAPACK_PREFIX=$MEKO_DATAPACK_PREFIX" >> .env; fi
 fi
 # Settings added after a server's first deploy.
 grep -q '^MEKO_GRID_KEY=' .env || echo "MEKO_GRID_KEY=$(openssl rand -hex 32)" >> .env
