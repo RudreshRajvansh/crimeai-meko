@@ -12,7 +12,7 @@ CrimeAI is an intelligence layer for Indian police stations. It reads FIRs in In
 > move from PostgreSQL to YugabyteDB, Meko shared memory between police agencies (`crimeai/backend/app/meko`, the
 > Meko panel on the FIR page, the Shared Memory page), investigation intelligence on the case dossier
 > (contradictions, timeline, officer review), and the sponsor integrations below (Gemini investigation review,
-> Solana chain of custody, Tiger Cloud time series, DigitalOcean and Vultr deployment), migrations 0010 to 0013.
+> Solana chain of custody, Tiger Cloud time series, DigitalOcean deployment), migrations 0010 to 0013.
 > The git history shows the starting point.
 
 CrimeAI links FIRs inside one agency's records. A courier-fraud ring in the NCR works across Delhi, Gurugram and
@@ -71,9 +71,9 @@ YugabyteDB stays the system of record; each platform does one job it is good at.
 | **Gemini API** | On the case dossier, **Explain with Gemini** reads the same documents as the agents (identifiers masked first) and, for every contradiction or gap, writes what disagrees, an honest likely cause, the record that would settle it (CCTV export, call records, RTO register) and one next step, plus a short plan and the documents missing from the file. It cannot add findings of its own; every request is audited. Also: English briefs and OCR of FIRs in 13 languages. | `app/nlp/gemini.py` |
 | **Solana** | **Chain of custody.** *Seal case file* hashes every document and officer review, builds a Merkle root and anchors it in one Memo transaction (devnet). *Verify* recomputes the hashes from YugabyteDB, names any document changed, added or removed since the seal, and reads the root back from the chain, with an Explorer link. Only hashes go on chain. | `app/services/custody.py`, `app/integrations/solana.py`, migration 0013 |
 | **Tiger Data** | Crimes are mirrored (time, type, district, severity, location only) into a **TimescaleDB hypertable on Tiger Cloud**, with hourly and daily **continuous aggregates** in Indian time and **compression** of chunks older than 90 days. The dashboard's *Time series · Tiger Cloud* card reads only the aggregates; a beat job syncs every five minutes. | `app/integrations/tiger.py`, `scripts/tiger_setup.py` |
-| **DigitalOcean** and **Vultr** | `python deploy/cloud.py up digitalocean` (or `vultr`) creates a Bangalore VM, copies the code and keys over SSH and brings up the production stack with HTTPS. Uploaded FIR scans and evidence can live in **Spaces** or **Vultr Object Storage** (`STORAGE_BACKEND=s3`, AWS Signature V4). | `deploy/cloud.py`, `app/services/storage.py` |
+| **DigitalOcean** | `python deploy/cloud.py up` creates a droplet in Bangalore with a cloud firewall, copies the code and keys over SSH and brings up the production stack with HTTPS. | `deploy/cloud.py` |
 
-Setup: `GEMINI_API_KEY`, `TIGER_DATABASE_URL` and the `S3_*` settings go in `crimeai/backend/.env` (see
+Setup: `GEMINI_API_KEY` and `TIGER_DATABASE_URL` go in `crimeai/backend/.env` (see
 `.env.example`); `python scripts/solana_setup.py` creates the devnet sealing key, and `python scripts/tiger_setup.py`
 creates the hypertable and backfills it.
 
@@ -169,15 +169,14 @@ It prints `http://localhost:5173` and the demo login (`admin@crimeai.example`; t
 
 **Gemini (optional):** create `crimeai/backend/.env` with `GEMINI_API_KEY=your-key` from [Google AI Studio](https://aistudio.google.com/apikey) and run `start.cmd` again. Without a key the feature is hidden and nothing leaves the server.
 
-## Deploy on DigitalOcean or Vultr
+## Deploy on DigitalOcean
 
 ```bash
-DIGITALOCEAN_TOKEN=... python deploy/cloud.py up digitalocean   # 4 vCPU / 8 GB droplet in blr1, cloud firewall
-VULTR_API_KEY=...      python deploy/cloud.py up vultr          # 4 vCPU / 8 GB instance in blr
-python deploy/cloud.py ship <ip>                                 # redeploy the committed code to an existing VM
+DIGITALOCEAN_TOKEN=... python deploy/cloud.py up   # 4 vCPU / 8 GB droplet in blr1, cloud firewall
+python deploy/cloud.py ship <ip>                   # redeploy the committed code to an existing droplet
 ```
 
-`up` creates a billable VM with your SSH key, copies the committed code (without the sample FIR images), the
+`up` creates a billable droplet with your SSH key, copies the committed code (without the sample FIR images), the
 service keys from `crimeai/backend/.env` and the Solana sealing key, and runs [`deploy/deploy.sh`](deploy/deploy.sh).
 It prints `https://<ip>.sslip.io` and the demo login when done (15–25 minutes the first time). A production server
 is its own agency on the Meko grid (datapacks `crimeai-prod-*`, its own grid key) and labels its Tiger rows with

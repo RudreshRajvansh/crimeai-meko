@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# One-command production deploy on a fresh Ubuntu/Debian VM (DigitalOcean, Vultr or Google Cloud).
-# deploy/cloud.py creates a DigitalOcean droplet or Vultr instance, copies the code and keys, and runs this.
+# One-command production deploy on a fresh Ubuntu/Debian VM (DigitalOcean or Google Cloud).
+# deploy/cloud.py creates a DigitalOcean droplet, copies the code and keys, and runs this.
 #
 #   GEMINI_API_KEY=your-key bash deploy/deploy.sh
 #
@@ -57,7 +57,7 @@ fi
 # service account (needs the cloud-platform scope and roles/aiplatform.user).
 VERTEX_PROJECT=${VERTEX_PROJECT:-$(curl -sf -m 2 -H "Metadata-Flavor: Google" \
   http://169.254.169.254/computeMetadata/v1/project/project-id || true)}
-# Service keys shipped by deploy/cloud.py (Meko, Tiger Cloud, Gemini, object storage) come first.
+# Service keys shipped by deploy/cloud.py (Meko, Tiger Cloud, Gemini) come first.
 if [ -f backend/.env.deploy ] || [ -n "${GEMINI_API_KEY:-}" ] || [ -n "$VERTEX_PROJECT" ]; then
   (umask 077
    { if [ -f backend/.env.deploy ]; then cat backend/.env.deploy; fi
@@ -66,7 +66,7 @@ if [ -f backend/.env.deploy ] || [ -n "${GEMINI_API_KEY:-}" ] || [ -n "$VERTEX_P
    } > backend/.env)
 fi
 
-# Vultr's Ubuntu images ship with ufw allowing only SSH.
+# Some Ubuntu images ship with ufw allowing only SSH.
 if command -v ufw >/dev/null 2>&1 && sudo ufw status | grep -q "Status: active"; then
   sudo ufw allow 80/tcp >/dev/null && sudo ufw allow 443/tcp >/dev/null
 fi
